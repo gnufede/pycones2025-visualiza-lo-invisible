@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CI Viz Simple - Test Results Inspector</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+        
+        .query-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .query-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .form-group label {
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        
+        .form-group input, .form-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+        }
+        
+        .query-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        
+        .results-section {
+            background: white;
+            border-radius: 8px;
+            flex: 1;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .results-header {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .results-count {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .results-table th {
+            background-color: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #dee2e6;
+            position: sticky;
+            top: 0;
+        }
+        
+        .results-table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .results-table tbody tr {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .results-table tbody tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .results-table tbody tr.selected {
+            background-color: #e3f2fd;
+        }
+        
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .status-passed {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-skipped {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        
+        .detail-panel {
+            width: 400px;
+            background: white;
+            border-left: 1px solid #eee;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .detail-header {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            background-color: #f8f9fa;
+        }
+        
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .detail-section {
+            margin-bottom: 25px;
+        }
+        
+        .detail-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .detail-field {
+            margin-bottom: 8px;
+        }
+        
+        .detail-field label {
+            font-weight: 500;
+            color: #666;
+            display: block;
+            margin-bottom: 2px;
+        }
+        
+        .detail-field span {
+            color: #333;
+            word-break: break-all;
+        }
+        
+        .related-runs {
+            margin-top: 20px;
+        }
+        
+        .related-run {
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .related-run:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .related-run-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .related-run-commit {
+            font-size: 12px;
+            color: #666;
+            font-family: monospace;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .pagination {
+            padding: 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .query-mode-toggle {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        
+        .sql-query-section {
+            margin-bottom: 15px;
+        }
+        
+        .sql-help {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 15px;
+            font-size: 13px;
+        }
+        
+        .sql-help h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+            font-size: 14px;
+        }
+        
+        .sql-help p {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+        
+        .field-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin: 8px 0;
+        }
+        
+        .field-tag {
+            background-color: #e3f2fd;
+            color: #1976d2;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        
+        .sql-help ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        
+        .sql-help li {
+            margin: 3px 0;
+            color: #6c757d;
+        }
+        
+        .sql-help code {
+            background-color: #e9ecef;
+            padding: 2px 4px;
+            border-radius: 2px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+        
+        .field-categories {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 10px 0;
+        }
+        
+        .field-category {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        
+        .field-category strong {
+            display: block;
+            margin-bottom: 8px;
+            color: #495057;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .sql-help-toggle {
+            margin-bottom: 10px;
+        }
+        
+        .sql-help-toggle button {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .sql-help {
+            transition: all 0.3s ease-in-out;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <div class="main-content">
+                <!-- Query Section -->
+                <div class="query-section">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2>Test Results Query</h2>
+                        <div class="query-mode-toggle">
+                            <button 
+                                @click="queryMode = 'form'" 
+                                :class="['btn', 'btn-sm', queryMode === 'form' ? 'btn-primary' : 'btn-secondary']"
+                            >
+                                Form
+                            </button>
+                            <button 
+                                @click="queryMode = 'sql'" 
+                                :class="['btn', 'btn-sm', queryMode === 'sql' ? 'btn-primary' : 'btn-secondary']"
+                            >
+                                SQL-like
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Form-based Query -->
+                    <div v-if="queryMode === 'form'">
+                        <form @submit.prevent="searchTests" class="query-form">
+                            <div class="form-group">
+                                <label for="test_name">Test Name</label>
+                                <input 
+                                    id="test_name" 
+                                    v-model="filters.test_name" 
+                                    type="text" 
+                                    placeholder="Partial match"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="test_status">Status</label>
+                                <select id="test_status" v-model="filters.test_status">
+                                    <option value="">All</option>
+                                    <option value="passed">Passed</option>
+                                    <option value="failed">Failed</option>
+                                    <option value="skipped">Skipped</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="git_branch">Git Branch</label>
+                                <input 
+                                    id="git_branch" 
+                                    v-model="filters.git_branch" 
+                                    type="text" 
+                                    placeholder="e.g., main, feature/auth"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="git_commit_hash">Commit Hash</label>
+                                <input 
+                                    id="git_commit_hash" 
+                                    v-model="filters.git_commit_hash" 
+                                    type="text" 
+                                    placeholder="Full or partial hash"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="start_date">Start Date</label>
+                                <input 
+                                    id="start_date" 
+                                    v-model="filters.start_date" 
+                                    type="datetime-local"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label for="end_date">End Date</label>
+                                <input 
+                                    id="end_date" 
+                                    v-model="filters.end_date" 
+                                    type="datetime-local"
+                                >
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- SQL-like Query -->
+                    <div v-if="queryMode === 'sql'">
+                        <div class="sql-query-section">
+                            <div class="sql-help-toggle">
+                                <button 
+                                    @click="showSqlHelp = !showSqlHelp" 
+                                    class="btn btn-sm btn-secondary"
+                                    style="margin-bottom: 10px;"
+                                >
+                                    {{ showSqlHelp ? 'Hide' : 'Show' }} SQL Help
+                                    <span style="margin-left: 5px;">{{ showSqlHelp ? '▲' : '▼' }}</span>
+                                </button>
+                            </div>
+                            
+                            <div v-if="showSqlHelp" class="sql-help">
+                                <h4>SQL-like Query Help</h4>
+                                <p>Write conditions without SELECT or WHERE keywords. Available fields:</p>
+                                <div class="field-categories">
+                                    <div class="field-category">
+                                        <strong>Test Info:</strong>
+                                        <div class="field-list">
+                                            <span class="field-tag">test_name</span>
+                                            <span class="field-tag">test_fqn</span>
+                                            <span class="field-tag">test_module</span>
+                                            <span class="field-tag">test_suite</span>
+                                            <span class="field-tag">test_file_path</span>
+                                            <span class="field-tag">test_line_number</span>
+                                        </div>
+                                    </div>
+                                    <div class="field-category">
+                                        <strong>Execution:</strong>
+                                        <div class="field-list">
+                                            <span class="field-tag">test_status</span>
+                                            <span class="field-tag">test_message</span>
+                                            <span class="field-tag">test_traceback</span>
+                                            <span class="field-tag">test_total_duration</span>
+                                            <span class="field-tag">test_call_duration</span>
+                                            <span class="field-tag">test_start_time</span>
+                                        </div>
+                                    </div>
+                                    <div class="field-category">
+                                        <strong>Git:</strong>
+                                        <div class="field-list">
+                                            <span class="field-tag">git_branch</span>
+                                            <span class="field-tag">git_commit_hash</span>
+                                            <span class="field-tag">git_commit_message</span>
+                                            <span class="field-tag">git_commit_author</span>
+                                            <span class="field-tag">git_commit_author_email</span>
+                                            <span class="field-tag">git_commit_timestamp</span>
+                                        </div>
+                                    </div>
+                                    <div class="field-category">
+                                        <strong>Environment:</strong>
+                                        <div class="field-list">
+                                            <span class="field-tag">env_python_version</span>
+                                            <span class="field-tag">env_platform</span>
+                                            <span class="field-tag">env_architecture</span>
+                                        </div>
+                                    </div>
+                                    <div class="field-category">
+                                        <strong>CI:</strong>
+                                        <div class="field-list">
+                                            <span class="field-tag">ci_system</span>
+                                            <span class="field-tag">ci_job_url</span>
+                                            <span class="field-tag">ci_pipeline_url</span>
+                                            <span class="field-tag">ci_trigger</span>
+                                            <span class="field-tag">ci_pull_request_number</span>
+                                        </div>
+                                    </div>
+                                    <div class="field-category">
+                                        <strong>Session:</strong>
+                                        <div class="field-list">
+                                            <span class="field-tag">session_id</span>
+                                            <span class="field-tag">session_start_time</span>
+                                            <span class="field-tag">session_end_time</span>
+                                            <span class="field-tag">session_total_duration</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p><strong>Examples:</strong></p>
+                                <ul>
+                                    <li><code>test_name like '%test_something%' and git_branch = 'main'</code></li>
+                                    <li><code>test_status = 'failed' and test_start_time >= '2024-01-01'</code></li>
+                                    <li><code>git_commit_hash like 'abc123%' or test_status = 'skipped'</code></li>
+                                    <li><code>ci_system = 'GitHub Actions' and test_total_duration > 5.0</code></li>
+                                    <li><code>env_python_version = '3.13.0' and test_status = 'failed'</code></li>
+                                    <li><code>git_commit_author = 'Federico Mon' and test_start_time >= '2024-01-01'</code></li>
+                                </ul>
+                            </div>
+                            <div class="form-group">
+                                <label for="sql_query">Query</label>
+                                <textarea 
+                                    id="sql_query" 
+                                    v-model="sqlQuery" 
+                                    placeholder="test_name like '%test_something%' and git_branch = 'main' and test_status = 'failed'"
+                                    rows="3"
+                                    style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 14px;"
+                                ></textarea>
+                            </div>
+                            <div v-if="sqlError" class="error">
+                                {{ sqlError }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="query-actions">
+                        <button @click="searchTests" class="btn btn-primary">Search</button>
+                        <button @click="clearFilters" class="btn btn-secondary">Clear</button>
+                    </div>
+                </div>
+                
+                <!-- Results Section -->
+                <div class="results-section">
+                    <div class="results-header">
+                        <h3>Test Results</h3>
+                        <div class="results-count" v-if="results.total_count !== undefined">
+                            Showing {{ results.results.length }} of {{ results.total_count }} results
+                        </div>
+                    </div>
+                    
+                    <div v-if="loading" class="loading">
+                        Loading...
+                    </div>
+                    
+                    <div v-else-if="error" class="error">
+                        {{ error }}
+                    </div>
+                    
+                    <div v-else-if="results.results.length === 0" class="no-results">
+                        No test results found
+                    </div>
+                    
+                    <div v-else style="overflow-x: auto; max-height: calc(100vh - 200px);">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Test Name</th>
+                                    <th>Status</th>
+                                    <th>Duration</th>
+                                    <th>Branch</th>
+                                    <th>Commit</th>
+                                    <th>Start Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr 
+                                    v-for="result in results.results" 
+                                    :key="result.id"
+                                    :class="{ selected: selectedResult && selectedResult.id === result.id }"
+                                    @click="selectResult(result)"
+                                >
+                                    <td>
+                                        <div style="font-weight: 500;">{{ result.test_name }}</div>
+                                        <div style="font-size: 12px; color: #666;">{{ result.test_fqn }}</div>
+                                    </td>
+                                    <td>
+                                        <span :class="'status-badge status-' + result.test_status">
+                                            {{ result.test_status }}
+                                        </span>
+                                    </td>
+                                    <td>{{ result.test_total_duration.toFixed(3) }}s</td>
+                                    <td>{{ result.git_branch || 'N/A' }}</td>
+                                    <td>
+                                        <span style="font-family: monospace; font-size: 12px;">
+                                            {{ result.git_commit_hash ? result.git_commit_hash.substring(0, 8) : 'N/A' }}
+                                        </span>
+                                    </td>
+                                    <td>{{ formatDateTime(result.test_start_time) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div v-if="results.results.length > 0" class="pagination">
+                        <button 
+                            @click="previousPage" 
+                            :disabled="!results.has_more || results.offset === 0"
+                            class="btn btn-secondary"
+                        >
+                            Previous
+                        </button>
+                        <span>Page {{ Math.floor(results.offset / 100) + 1 }}</span>
+                        <button 
+                            @click="nextPage" 
+                            :disabled="!results.has_more"
+                            class="btn btn-secondary"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Detail Panel -->
+            <div class="detail-panel" v-if="selectedResult">
+                <div class="detail-header">
+                    <h3>{{ selectedResult.test_name }}</h3>
+                    <span :class="'status-badge status-' + selectedResult.test_status">
+                        {{ selectedResult.test_status }}
+                    </span>
+                </div>
+                
+                <div class="detail-content">
+                    <!-- Test Details -->
+                    <div class="detail-section">
+                        <h3>Test Details</h3>
+                        <div class="detail-field">
+                            <label>Full Name:</label>
+                            <span>{{ selectedResult.test_fqn }}</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>Module:</label>
+                            <span>{{ selectedResult.test_module }}</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>File:</label>
+                            <span>{{ selectedResult.test_file_path }}</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>Duration:</label>
+                            <span>{{ selectedResult.test_total_duration.toFixed(3) }}s</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>Start Time:</label>
+                            <span>{{ formatDateTime(selectedResult.test_start_time) }}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Git Information -->
+                    <div class="detail-section">
+                        <h3>Git Information</h3>
+                        <div class="detail-field">
+                            <label>Branch:</label>
+                            <span>{{ selectedResult.git_branch || 'N/A' }}</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>Commit:</label>
+                            <span style="font-family: monospace; font-size: 12px;">{{ selectedResult.git_commit_hash || 'N/A' }}</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>Author:</label>
+                            <span>{{ selectedResult.git_commit_author || 'N/A' }}</span>
+                        </div>
+                        <div class="detail-field">
+                            <label>Message:</label>
+                            <span>{{ selectedResult.git_commit_message || 'N/A' }}</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Error Information -->
+                    <div class="detail-section" v-if="selectedResult.test_status === 'failed'">
+                        <h3>Error Information</h3>
+                        <div class="detail-field">
+                            <label>Message:</label>
+                            <span>{{ selectedResult.test_message || 'N/A' }}</span>
+                        </div>
+                        <div class="detail-field" v-if="selectedResult.test_traceback">
+                            <label>Traceback:</label>
+                            <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 12px; overflow-x: auto;">{{ selectedResult.test_traceback }}</pre>
+                        </div>
+                    </div>
+                    
+                    <!-- Related Test Runs -->
+                    <div class="detail-section related-runs" v-if="relatedRuns.length > 0">
+                        <h3>Related Test Runs</h3>
+                        <div 
+                            v-for="run in relatedRuns" 
+                            :key="run.id"
+                            class="related-run"
+                            @click="selectResultById(run.id)"
+                        >
+                            <div class="related-run-header">
+                                <span :class="'status-badge status-' + run.test_status">
+                                    {{ run.test_status }}
+                                </span>
+                                <span class="related-run-commit">{{ run.git_commit_hash.substring(0, 8) }}</span>
+                            </div>
+                            <div style="font-size: 12px; color: #666;">
+                                {{ formatDateTime(run.test_start_time) }} - {{ run.test_total_duration.toFixed(3) }}s
+                            </div>
+                            <div style="font-size: 11px; color: #999; margin-top: 2px;">
+                                {{ run.git_commit_message }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        
+        createApp({
+            data() {
+                return {
+                    queryMode: 'form', // 'form' or 'sql'
+                    showSqlHelp: false, // Controls SQL help visibility
+                    filters: {
+                        test_name: '',
+                        test_status: '',
+                        git_branch: '',
+                        git_commit_hash: '',
+                        start_date: '',
+                        end_date: ''
+                    },
+                    sqlQuery: '',
+                    sqlError: null,
+                    results: {
+                        results: [],
+                        total_count: 0,
+                        limit: 100,
+                        offset: 0,
+                        has_more: false
+                    },
+                    selectedResult: null,
+                    relatedRuns: [],
+                    loading: false,
+                    error: null
+                };
+            },
+            mounted() {
+                this.searchTests();
+            },
+            methods: {
+                async searchTests() {
+                    this.loading = true;
+                    this.error = null;
+                    this.sqlError = null;
+                    
+                    try {
+                        const params = new URLSearchParams();
+                        
+                        if (this.queryMode === 'form') {
+                            // Use form filters
+                            Object.keys(this.filters).forEach(key => {
+                                if (this.filters[key]) {
+                                    params.append(key, this.filters[key]);
+                                }
+                            });
+                        } else if (this.queryMode === 'sql') {
+                            // Use SQL-like query
+                            if (this.sqlQuery.trim()) {
+                                params.append('sql_query', this.sqlQuery.trim());
+                            }
+                        }
+                        
+                        params.append('limit', this.results.limit);
+                        params.append('offset', this.results.offset);
+                        
+                        const response = await axios.get(`/api/v1/test-results/?${params}`);
+                        this.results = response.data;
+                    } catch (error) {
+                        if (error.response?.data?.detail?.includes('SQL')) {
+                            this.sqlError = error.response.data.detail;
+                        } else {
+                            this.error = error.response?.data?.detail || 'Failed to fetch test results';
+                        }
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                async selectResult(result) {
+                    this.selectedResult = result;
+                    await this.loadRelatedRuns(result.id);
+                },
+                
+                async selectResultById(id) {
+                    try {
+                        const response = await axios.get(`/api/v1/test-results/${id}`);
+                        this.selectedResult = response.data;
+                        await this.loadRelatedRuns(id);
+                    } catch (error) {
+                        this.error = error.response?.data?.detail || 'Failed to fetch test result';
+                    }
+                },
+                
+                async loadRelatedRuns(testResultId) {
+                    try {
+                        const response = await axios.get(`/api/v1/test-results/${testResultId}/related`);
+                        this.relatedRuns = response.data.related_runs;
+                    } catch (error) {
+                        console.error('Failed to load related runs:', error);
+                        this.relatedRuns = [];
+                    }
+                },
+                
+                clearFilters() {
+                    this.filters = {
+                        test_name: '',
+                        test_status: '',
+                        git_branch: '',
+                        git_commit_hash: '',
+                        start_date: '',
+                        end_date: ''
+                    };
+                    this.sqlQuery = '';
+                    this.sqlError = null;
+                    this.results.offset = 0;
+                    this.searchTests();
+                },
+                
+                nextPage() {
+                    if (this.results.has_more) {
+                        this.results.offset += this.results.limit;
+                        this.searchTests();
+                    }
+                },
+                
+                previousPage() {
+                    if (this.results.offset > 0) {
+                        this.results.offset = Math.max(0, this.results.offset - this.results.limit);
+                        this.searchTests();
+                    }
+                },
+                
+                formatDateTime(dateString) {
+                    if (!dateString) return 'N/A';
+                    const date = new Date(dateString);
+                    return date.toLocaleString();
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
