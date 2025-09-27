@@ -2,14 +2,14 @@
 Sample queries for analyzing test failure patterns in CI.
 """
 import sqlite3
-from typing import List, Dict, Any, Optional
+import typing as t
 from pathlib import Path
 from datetime import datetime, timedelta
 
 DB_PATH = Path(__file__).parent / "ci_viz.db"
 
 
-def get_flaky_tests(days: int = 7, min_runs: int = 3) -> List[Dict[str, Any]]:
+def get_flaky_tests(days: int = 7, min_runs: int = 3) -> t.List[t.Dict[str, t.Any]]:
     """
     Query 1: Flaky tests - Different test runs (with same test fqn) for the same git sha 
     pass and fail at different test sessions (in a given time period).
@@ -71,7 +71,7 @@ def get_flaky_tests(days: int = 7, min_runs: int = 3) -> List[Dict[str, Any]]:
     ]
 
 
-def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -> List[Dict[str, Any]]:
+def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -> t.List[t.Dict[str, t.Any]]:
     """
     Query 2: Failing tests across branches - Different test runs for different branches 
     fail with the same error traceback (with same test fqn, in a given time period).
@@ -131,7 +131,7 @@ def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -
     ]
 
 
-def get_underlying_issues(days: int = 7, min_tests: int = 2) -> List[Dict[str, Any]]:
+def get_underlying_issues(days: int = 7, min_tests: int = 2) -> t.List[t.Dict[str, t.Any]]:
     """
     Query 3: Underlying issues - Different test runs for different branches fail with 
     the same error traceback (with different test fqn, in a given time period).
@@ -193,7 +193,7 @@ def get_underlying_issues(days: int = 7, min_tests: int = 2) -> List[Dict[str, A
     ]
 
 
-def get_test_time_regressions(days: int = 7, threshold_multiplier: float = 2.0) -> List[Dict[str, Any]]:
+def get_test_time_regressions(days: int = 7, threshold_multiplier: float = 2.0) -> t.List[t.Dict[str, t.Any]]:
     """
     Query 4: Test time regression - A test duration (single test fqn) increases 
     above some threshold (in a given time period).
@@ -274,7 +274,7 @@ def get_test_time_regressions(days: int = 7, threshold_multiplier: float = 2.0) 
     ]
 
 
-def get_test_order_correlations(days: int = 7, min_correlation: float = 0.7) -> List[Dict[str, Any]]:
+def get_test_order_correlations(days: int = 7, min_correlation: float = 0.7) -> t.List[t.Dict[str, t.Any]]:
     """
     Query 5: Test order correlation - Inspect if there is a correlation for sessions 
     where some tests are run before others, and make the latter fail.
@@ -354,7 +354,7 @@ def get_test_order_correlations(days: int = 7, min_correlation: float = 0.7) -> 
     ]
 
 
-def run_all_queries(days: int = 7) -> Dict[str, Any]:
+def run_all_queries(days: int = 7) -> t.Dict[str, t.Any]:
     """Run all analysis queries and return results."""
     return {
         "flaky_tests": get_flaky_tests(days),
