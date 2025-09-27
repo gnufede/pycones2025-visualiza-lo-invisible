@@ -1,0 +1,239 @@
+# CI Viz Simple
+
+A simple demonstration system for tracking test failure patterns across CI environments. Built for a PyCon talk about test and CI visibility.
+
+## Overview
+
+This project demonstrates how to build a system that:
+1. Captures comprehensive test execution data during pytest runs
+2. Ingests this data into a FastAPI service with SQLite storage
+3. Provides analysis endpoints to identify common test failure patterns
+
+## Architecture
+
+- **Test Data Collection**: `conftest.py` captures test execution metadata using native Python 3.13 HTTP
+- **Data Ingestion**: FastAPI service receives and stores denormalized test results
+- **Storage**: SQLite database with fully denormalized schema for fast queries
+- **Analysis**: Pre-built queries for common failure pattern detection
+- **CLI Tools**: Hatch scripts for service management and data loading
+
+## Quick Start
+
+### 1. Install Dependencies
+
+```bash
+hatch env create
+```
+
+### 2. Start the CI Viz Service
+
+```bash
+hatch run python -m ci_viz_simple.main
+```
+
+The service will start on `http://localhost:8000`. You can view the API documentation at `http://localhost:8000/docs`.
+
+### 3. Load Demo Data (Optional)
+
+```bash
+hatch run ci-viz-load-fixtures
+```
+
+This loads comprehensive fixture data that demonstrates all analysis patterns.
+
+### 4. Run Tests
+
+```bash
+hatch run pytest tests/
+```
+
+The `conftest.py` will automatically capture test data and send it to the running service using native Python 3.13 HTTP libraries.
+
+## CLI Commands
+
+The project includes several hatch scripts for easy management:
+
+- `hatch run python -m ci_viz_simple.main` - Start the FastAPI service
+- `hatch run ci-viz-load-fixtures` - Load demo data for all analysis patterns
+- `hatch run pytest tests/` - Run tests with automatic data collection
+
+## API Endpoints
+
+### Data Ingestion
+- `POST /api/v1/ingest-test-results/` - Ingest test results (denormalized)
+- `GET /api/v1/stats` - Get basic statistics
+
+### Analysis Endpoints
+- `GET /api/v1/analysis/flaky-tests` - Find flaky tests (same test, same commit, different outcomes)
+- `GET /api/v1/analysis/failing-across-branches` - Tests failing with same error across branches
+- `GET /api/v1/analysis/underlying-issues` - Common error patterns affecting multiple tests
+- `GET /api/v1/analysis/time-regressions` - Tests with significant duration increases
+- `GET /api/v1/analysis/test-order-correlations` - Test execution order impact on failures
+- `GET /api/v1/analysis/all` - Run all analyses
+
+## Sample Queries Explained
+
+### 1. Flaky Tests
+Identifies tests that pass and fail for the same git commit hash, indicating non-deterministic behavior.
+
+**Use case**: Find tests that are unreliable and need investigation.
+
+### 2. Failing Tests Across Branches
+Finds tests with the same name failing with identical error messages across different branches.
+
+**Use case**: Identify systematic issues that affect multiple development streams.
+
+### 3. Underlying Issues
+Discovers common error patterns affecting different tests across branches.
+
+**Use case**: Find root causes that manifest in multiple test failures.
+
+### 4. Test Time Regressions
+Detects tests whose execution time has increased significantly compared to baseline.
+
+**Use case**: Identify performance regressions in test code or application code.
+
+### 5. Test Order Correlations
+Analyzes whether certain test execution orders correlate with failures.
+
+**Use case**: Find tests that have hidden dependencies or side effects.
+
+## Configuration
+
+### Environment Variables
+
+- `CI_VIZ_URL`: URL of the CI Viz service (default: `http://localhost:8000`)
+- `CI_VIZ_DEBUG`: Enable debug output (default: `true`)
+
+### Query Parameters
+
+All analysis endpoints support these parameters:
+- `days`: Time window for analysis (default: 7)
+- Additional parameters specific to each analysis type
+
+## Data Schema
+
+The system uses a fully denormalized SQLite schema (`test_results` table) that stores all data in a single table:
+
+- **Test Identification**: Test ID, name, FQN, module, suite, file path, line number
+- **Test Execution**: Status, message, traceback, durations, start time
+- **Session Information**: Unique session ID, timestamps, duration
+- **Git Information**: Repository, branch, commit hash, author, message, timestamp
+- **Environment**: Python version, platform, architecture, dependencies, environment variables
+- **CI Information**: CI system details, job URLs, pipeline information, trigger, PR number
+
+This denormalized approach enables fast queries across all dimensions without complex joins.
+
+## Example Usage
+
+### Running Analysis
+
+```bash
+# Load demo data first
+hatch run ci-viz-load-fixtures
+
+# Get flaky tests from the last 14 days
+curl "http://localhost:8000/api/v1/analysis/flaky-tests?days=14&min_runs=5"
+
+# Find time regressions with 3x threshold
+curl "http://localhost:8000/api/v1/analysis/time-regressions?threshold_multiplier=3.0"
+
+# Get comprehensive analysis
+curl "http://localhost:8000/api/v1/analysis/all?days=30"
+```
+
+### Custom Test Data
+
+You can also send custom test data directly as denormalized test results:
+
+```python
+import urllib.request
+import json
+
+test_results = [
+    {
+        "test_id": "test_example.py::test_function",
+        "test_name": "test_function",
+        "test_fqn": "test_example.py::test_function",
+        "test_module": "test_example",
+        "test_status": "passed",
+        "test_total_duration": 0.1,
+        "test_call_duration": 0.1,
+        "test_start_time": "2025-09-27T10:00:01+00:00",
+        "session_id": "custom-session-123",
+        "session_start_time": "2025-09-27T10:00:00+00:00",
+        "session_end_time": "2025-09-27T10:05:00+00:00",
+        "session_total_duration": 300.0,
+        "git_repository_url": "https://github.com/example/repo.git",
+        "git_branch": "main",
+        "git_commit_hash": "abc123",
+        "env_python_version": "3.11.0",
+        "env_platform": "darwin",
+        "env_architecture": "arm64",
+        "env_dependencies": "[]",
+        "env_vars": "{}",
+        # ... other fields
+    }
+]
+
+url = "http://localhost:8000/api/v1/ingest-test-results/"
+data = json.dumps(test_results).encode('utf-8')
+req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+response = urllib.request.urlopen(req)
+```
+
+## Development
+
+### Project Structure
+
+```
+src/ci_viz_simple/
+├── __init__.py
+├── main.py          # FastAPI application with denormalized TestResult model
+├── queries.py       # Analysis query implementations
+└── fixtures.py      # Demo fixture data + CLI script for loading
+
+tests/
+├── conftest.py      # pytest plugin using native Python 3.13 HTTP
+├── test_demo.py     # Demo tests
+└── ...
+
+pyproject.toml       # Hatch configuration with CLI scripts
+```
+
+### Adding New Analysis Queries
+
+1. Add your query function to `queries.py`
+2. Add a corresponding endpoint in `main.py`
+3. Update the `run_all_queries()` function if needed
+
+## Key Features
+
+- **Minimal Dependencies**: Only FastAPI, uvicorn, and pydantic
+- **Native Python**: Uses Python 3.13's built-in HTTP libraries (no requests)
+- **Fully Denormalized**: Single table design for maximum query performance
+- **Hatch Integration**: Modern Python project management with CLI scripts
+- **Comprehensive Demo Data**: Shows all analysis patterns immediately
+- **Production Ready**: Proper error handling and graceful degradation
+
+## Use Cases for PyCon Talk
+
+This system demonstrates several key concepts:
+
+1. **Observability**: How to instrument test suites for better visibility
+2. **Data-Driven Decisions**: Using test execution data to improve reliability
+3. **Pattern Recognition**: Automated detection of common failure modes
+4. **CI/CD Integration**: Seamless integration with existing test workflows
+5. **Modern Python**: Using latest Python features and best practices
+
+## Future Enhancements
+
+- Web dashboard for visualization
+- Integration with more CI systems
+- Machine learning for failure prediction
+- Test result trending and alerting
+- Integration with issue tracking systems
+
+## License
+
+This project is created for educational purposes as part of a PyCon talk demonstration.
