@@ -102,12 +102,14 @@ curl -s "http://localhost:8000/api/v1/analysis/flaky-tests?days=7&min_runs=3" | 
     {
       "test_fqn": "tests/test_flaky.py::test_flaky",
       "git_commit_hash": "abc123flaky",
-      "total_runs": 5,
-      "statuses": "passed,failed",
-      "first_run": "2025-09-27T09:32:18.536829",
-      "last_run": "2025-09-27T13:32:18.536829",
+      "total_runs": 15,
+      "passed_count": 9,
+      "failed_count": 6,
+      "skipped_count": 0,
+      "first_run": "2025-09-27T09:40:44.925493",
+      "last_run": "2025-09-27T16:58:12.467017",
       "session_count": 5,
-      "avg_runs_per_session": 1.0
+      "pass_rate": 60.0
     }
   ]
 }
@@ -220,12 +222,14 @@ curl -s "http://localhost:8000/api/v1/analysis/all?days=7" | jq .
     {
       "test_fqn": "tests/test_flaky.py::test_flaky",
       "git_commit_hash": "abc123flaky",
-      "total_runs": 5,
-      "statuses": "passed,failed",
-      "first_run": "2025-09-27T09:32:18.536829",
-      "last_run": "2025-09-27T13:32:18.536829",
+      "total_runs": 15,
+      "passed_count": 9,
+      "failed_count": 6,
+      "skipped_count": 0,
+      "first_run": "2025-09-27T09:40:44.925493",
+      "last_run": "2025-09-27T16:58:12.467017",
       "session_count": 5,
-      "avg_runs_per_session": 1.0
+      "pass_rate": 60.0
     }
   ],
   "failing_tests_across_branches": [
