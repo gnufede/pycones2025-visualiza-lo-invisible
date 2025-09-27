@@ -321,8 +321,15 @@ def load_fixture_data():
 def load_fixtures_cli():
     """CLI entry point for loading fixture data."""
     import sys
+    from .main import init_database
     
     try:
+        # Initialize database first
+        print("🔧 Initializing database...")
+        init_database()
+        print("✅ Database initialized")
+        
+        # Load fixture data
         count = load_fixture_data()
         print(f"✅ Successfully loaded {count} fixture test results")
         print("🎯 The fixture data demonstrates all analysis patterns:")
