@@ -5,7 +5,9 @@ This module provides optimized SQL queries for analyzing test failure patterns i
 The queries are designed to identify common issues like flaky tests, cross-branch failures,
 underlying systemic problems, performance regressions, and test order dependencies.
 
-All queries include proper status filtering to handle 'passed', 'failed', 'error', and 'skipped' statuses.
+All queries include proper status filtering to handle all test statuses:
+- 'passed', 'failed', 'error', 'skipped' - standard pytest outcomes
+- 'xfailed', 'xpassed' - expected failure outcomes (tests marked as problematic)
 """
 
 import sqlite3
@@ -16,8 +18,8 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "ci_viz.db"
 
 # Valid test statuses for filtering
-VALID_STATUSES = ("passed", "failed", "error", "skipped")
-FAILURE_STATUSES = ("failed", "error")
+VALID_STATUSES = ("passed", "failed", "error", "skipped", "xfailed", "xpassed")
+FAILURE_STATUSES = ("failed", "error", "xfailed")  # xfailed is also a failure (expected)
 
 # Default thresholds for analysis queries
 DEFAULT_DAYS_LOOKBACK = 7
@@ -84,7 +86,7 @@ def get_flaky_tests(
         "test_start_time >= ?",
         "git_commit_hash IS NOT NULL",
         "git_commit_hash != 'unknown'",
-        "test_status IN ('passed', 'failed', 'error', 'skipped')",
+        "test_status IN ('passed', 'failed', 'error', 'skipped', 'xfailed', 'xpassed')",
     ]
     params = [date_threshold]
 
@@ -110,8 +112,8 @@ def get_flaky_tests(
 
                 -- Count how many times each status occurred using conditional aggregation
                 -- CASE WHEN creates a boolean (0 or 1), SUM adds them up
-                SUM(CASE WHEN test_status = 'passed' THEN 1 ELSE 0 END) as passed_count,
-                SUM(CASE WHEN test_status IN ('failed', 'error') THEN 1 ELSE 0 END) as failed_count,
+                SUM(CASE WHEN test_status IN ('passed', 'xpassed') THEN 1 ELSE 0 END) as passed_count,
+                SUM(CASE WHEN test_status IN ('failed', 'error', 'xfailed') THEN 1 ELSE 0 END) as failed_count,
                 SUM(CASE WHEN test_status = 'skipped' THEN 1 ELSE 0 END) as skipped_count,
 
                 -- Find the time range when this test was run
@@ -203,7 +205,7 @@ def get_failing_tests_across_branches(
     # Build WHERE clause dynamically based on provided filters
     where_conditions = [
         "test_start_time >= ?",
-        "test_status IN ('failed', 'error')",
+        "test_status IN ('failed', 'error', 'xfailed')",  # Include xfailed as failures
         "test_traceback IS NOT NULL",
         "test_traceback != ''",
         "git_branch IS NOT NULL",
@@ -319,7 +321,7 @@ def get_underlying_issues(
     # Build WHERE clause dynamically based on provided filters
     where_conditions = [
         "test_start_time >= ?",
-        "test_status IN ('failed', 'error')",
+        "test_status IN ('failed', 'error', 'xfailed')",  # Include xfailed as failures
         "test_traceback IS NOT NULL",
         "test_traceback != ''",
         "git_branch IS NOT NULL",
@@ -450,7 +452,7 @@ def get_test_time_regressions(
 
             FROM test_results
             WHERE test_start_time >= ?              -- Only recent runs
-                AND test_status IN ('passed', 'failed')  -- Only completed runs (not skipped)
+                AND test_status IN ('passed', 'failed', 'xpassed', 'xfailed')  -- Only completed runs (not skipped)
                 AND test_total_duration > 0         -- Must have valid duration
         ),
 
@@ -569,7 +571,7 @@ def get_test_order_correlations(
 
             FROM test_results
             WHERE test_start_time >= ?              -- Only recent runs
-                AND test_status IN ('passed', 'failed', 'error')  -- Only completed tests
+                AND test_status IN ('passed', 'failed', 'error', 'xpassed', 'xfailed')  -- Only completed tests
         ),
 
         -- Step 2: Create all possible pairs of tests that ran in the same session
@@ -601,16 +603,16 @@ def get_test_order_correlations(
                 -- Count specific scenarios using conditional aggregation
                 -- How many times did the second test fail AFTER the first test passed?
                 -- This suggests the first test might be causing the second to fail
-                SUM(CASE WHEN first_status = 'passed' AND second_status IN ('failed', 'error') THEN 1 ELSE 0 END) as failure_after_success,
+                SUM(CASE WHEN first_status IN ('passed', 'xpassed') AND second_status IN ('failed', 'error', 'xfailed') THEN 1 ELSE 0 END) as failure_after_success,
 
                 -- How many times did both tests fail?
-                SUM(CASE WHEN first_status IN ('failed', 'error') AND second_status IN ('failed', 'error') THEN 1 ELSE 0 END) as failure_after_failure,
+                SUM(CASE WHEN first_status IN ('failed', 'error', 'xfailed') AND second_status IN ('failed', 'error', 'xfailed') THEN 1 ELSE 0 END) as failure_after_failure,
 
                 -- How many times did both tests pass?
-                SUM(CASE WHEN first_status = 'passed' AND second_status = 'passed' THEN 1 ELSE 0 END) as success_after_success,
+                SUM(CASE WHEN first_status IN ('passed', 'xpassed') AND second_status IN ('passed', 'xpassed') THEN 1 ELSE 0 END) as success_after_success,
 
                 -- How many times did the second test fail (regardless of first test)?
-                SUM(CASE WHEN second_status IN ('failed', 'error') THEN 1 ELSE 0 END) as total_second_failures
+                SUM(CASE WHEN second_status IN ('failed', 'error', 'xfailed') THEN 1 ELSE 0 END) as total_second_failures
 
             FROM test_pairs
             GROUP BY first_test, second_test         -- Group by test pair
@@ -758,7 +760,7 @@ def get_problematic_tests(
             test_fqn = test_fqn_raw.strip()
             if not test_fqn:
                 continue
-                
+
             # If already identified, add this as additional context
             if test_fqn in problematic_tests:
                 problematic_tests[test_fqn]["source_analysis"] += ", underlying_issues"

@@ -18,7 +18,7 @@ PROBLEMATIC_TESTS = set()  # Cache for problematic test FQNs
 
 def fetch_problematic_tests():
     """Fetch list of problematic tests from CI Viz service."""
-    global PROBLEMATIC_TESTS
+    global PROBLEMATIC_TESTS  # noqa: PLW0602
 
     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
 
@@ -30,7 +30,7 @@ def fetch_problematic_tests():
     # Skip if we don't have git info or if it's unknown
     if not git_repository_url or git_repository_url == "unknown":
         return  # No repository info available, can't filter problematic tests
-        
+
     if not git_branch or git_branch == "unknown":
         return  # No branch info available, can't filter problematic tests
 
@@ -100,14 +100,27 @@ def pytest_runtest_logreport(report):
     if report.when == "call":  # Only capture the main test execution
         # Check if this test was marked as problematic by CI Viz
         was_marked_problematic = report.nodeid in PROBLEMATIC_TESTS
-        
+
+        # Determine the actual test status
+        # pytest reports xfailed tests as "skipped" with wasxfail attribute
+        # and xpassed tests as "passed" with wasxfail attribute
+        if hasattr(report, 'wasxfail'):
+            if report.outcome == "skipped":
+                test_status = "xfailed"  # Expected to fail and did fail
+            elif report.outcome == "passed":
+                test_status = "xpassed"  # Expected to fail but passed!
+            else:
+                test_status = map_pytest_outcome(report.outcome)
+        else:
+            test_status = map_pytest_outcome(report.outcome)
+
         test_result = {
             "test_id": report.nodeid,
             "test_name": report.nodeid.split("::")[-1],
             "test_fqn": report.nodeid,
             "test_module": report.nodeid.split("::")[0].replace("/", ".").replace(".py", ""),
             "test_suite": report.nodeid.split("::")[1] if "::" in report.nodeid else None,
-            "test_status": map_pytest_outcome(report.outcome),
+            "test_status": test_status,
             "test_message": str(report.longrepr) if report.failed else None,
             "test_traceback": str(report.longrepr) if report.failed else None,
             "test_total_duration": report.duration,

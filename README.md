@@ -49,6 +49,22 @@ hatch run pytest tests/
 
 The `conftest.py` will automatically capture test data and send it to the running service using native Python 3.13 HTTP libraries.
 
+### 5. Run Integration Test (Optional)
+
+To verify the complete problematic test detection feedback loop:
+
+```bash
+python run_integration_test.py
+```
+
+This will:
+1. Backup and reset the database
+2. Start the server (if not running)
+3. Run tests multiple times to generate data
+4. Verify that problematic tests are detected and marked as xfail
+5. Confirm xfailed/xpassed statuses are tracked
+6. Restore the original database
+
 ## CLI Commands
 
 The project includes several hatch scripts for easy management:
@@ -287,11 +303,14 @@ src/ci_viz_simple/
 └── fixtures.py      # Demo fixture data + CLI script for loading
 
 tests/
-├── conftest.py      # pytest plugin using native Python 3.13 HTTP
-├── test_demo.py     # Demo tests
+├── conftest.py                    # pytest plugin using native Python 3.13 HTTP
+├── test_demo.py                   # Demo tests
+├── test_problematic_integration.py # Flaky tests for integration testing
+├── test_integration.py            # Integration test module
 └── ...
 
-pyproject.toml       # Hatch configuration with CLI scripts
+run_integration_test.py  # Standalone integration test runner
+pyproject.toml           # Hatch configuration with CLI scripts
 ```
 
 ### Adding New Analysis Queries

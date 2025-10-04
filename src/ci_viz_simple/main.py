@@ -54,7 +54,9 @@ class TestResult(BaseModel):
     test_total_duration: float
     test_call_duration: float
     test_start_time: str
-    was_marked_problematic: bool = False  # Whether CI Viz marked this test as problematic
+    was_marked_problematic: bool = (
+        False  # Whether CI Viz marked this test as problematic
+    )
 
     # Session information
     session_id: str
@@ -230,7 +232,9 @@ async def ingest_test_results(test_results: list[TestResult]):
                     test_result.test_total_duration,
                     test_result.test_call_duration,
                     test_result.test_start_time,
-                    1 if test_result.was_marked_problematic else 0,  # Convert bool to int for SQLite
+                    (
+                        1 if test_result.was_marked_problematic else 0
+                    ),  # Convert bool to int for SQLite
                     test_result.session_id,
                     test_result.session_start_time,
                     test_result.session_end_time,
@@ -454,18 +458,17 @@ async def get_problematic_tests_endpoint(
                     "min_runs": min_runs,
                 },
             }
-        else:
-            # Return detailed information
-            return {
-                "results": results,
-                "count": len(results),
-                "filters": {
-                    "git_repository_url": git_repository_url,
-                    "git_branch": git_branch,
-                    "days": days,
-                    "min_runs": min_runs,
-                },
-            }
+        # Return detailed information
+        return {
+            "results": results,
+            "count": len(results),
+            "filters": {
+                "git_repository_url": git_repository_url,
+                "git_branch": git_branch,
+                "days": days,
+                "min_runs": min_runs,
+            },
+        }
 
     except Exception as e:
         raise HTTPException(
