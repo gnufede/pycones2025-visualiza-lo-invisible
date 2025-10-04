@@ -54,6 +54,7 @@ class TestResult(BaseModel):
     test_total_duration: float
     test_call_duration: float
     test_start_time: str
+    was_marked_problematic: bool = False  # Whether CI Viz marked this test as problematic
 
     # Session information
     session_id: str
@@ -114,6 +115,7 @@ def init_database():
             test_total_duration REAL NOT NULL,
             test_call_duration REAL NOT NULL,
             test_start_time TEXT NOT NULL,
+            was_marked_problematic INTEGER DEFAULT 0,  -- Whether CI Viz marked this test as problematic (boolean as INTEGER)
 
             -- Session information
             session_id TEXT NOT NULL,
@@ -171,6 +173,9 @@ def init_database():
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_test_traceback ON test_results(test_traceback)"
     )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_was_marked_problematic ON test_results(was_marked_problematic)"
+    )
 
     conn.commit()
     conn.close()
@@ -202,13 +207,14 @@ async def ingest_test_results(test_results: list[TestResult]):
                 INSERT INTO test_results (
                     test_id, test_name, test_fqn, test_module, test_suite, test_file_path, test_line_number,
                     test_status, test_message, test_traceback, test_total_duration, test_call_duration, test_start_time,
+                    was_marked_problematic,
                     session_id, session_start_time, session_end_time, session_total_duration,
                     git_repository_url, git_branch, git_commit_hash, git_commit_message,
                     git_commit_author, git_commit_author_email, git_commit_timestamp,
                     env_python_version, env_platform, env_architecture, env_dependencies, env_vars,
                     ci_system, ci_job_url, ci_pipeline_url, ci_job_id, ci_pipeline_id,
                     ci_trigger, ci_pull_request_number
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     test_result.test_id,
@@ -224,6 +230,7 @@ async def ingest_test_results(test_results: list[TestResult]):
                     test_result.test_total_duration,
                     test_result.test_call_duration,
                     test_result.test_start_time,
+                    1 if test_result.was_marked_problematic else 0,  # Convert bool to int for SQLite
                     test_result.session_id,
                     test_result.session_start_time,
                     test_result.session_end_time,
@@ -300,14 +307,18 @@ async def get_stats():
 
 @app.get("/api/v1/analysis/flaky-tests")
 async def analyze_flaky_tests(
-    days: int = 7, 
+    days: int = 7,
     min_runs: int = 3,
-    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
-    git_branch: str | None = Query(None, description="Filter by git branch")
+    git_repository_url: str | None = Query(
+        None, description="Filter by repository URL"
+    ),
+    git_branch: str | None = Query(None, description="Filter by git branch"),
 ):
     """Get flaky tests - tests that pass and fail for the same commit."""
     try:
-        return {"results": get_flaky_tests(days, min_runs, git_repository_url, git_branch)}
+        return {
+            "results": get_flaky_tests(days, min_runs, git_repository_url, git_branch)
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to analyze flaky tests: {e!s}"
@@ -316,14 +327,20 @@ async def analyze_flaky_tests(
 
 @app.get("/api/v1/analysis/failing-across-branches")
 async def analyze_failing_across_branches(
-    days: int = 7, 
+    days: int = 7,
     min_occurrences: int = 2,
-    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
-    git_branch: str | None = Query(None, description="Filter by git branch")
+    git_repository_url: str | None = Query(
+        None, description="Filter by repository URL"
+    ),
+    git_branch: str | None = Query(None, description="Filter by git branch"),
 ):
     """Get tests failing with same error across different branches."""
     try:
-        return {"results": get_failing_tests_across_branches(days, min_occurrences, git_repository_url, git_branch)}
+        return {
+            "results": get_failing_tests_across_branches(
+                days, min_occurrences, git_repository_url, git_branch
+            )
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to analyze cross-branch failures: {e!s}"
@@ -332,14 +349,20 @@ async def analyze_failing_across_branches(
 
 @app.get("/api/v1/analysis/underlying-issues")
 async def analyze_underlying_issues(
-    days: int = 7, 
+    days: int = 7,
     min_tests: int = 2,
-    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
-    git_branch: str | None = Query(None, description="Filter by git branch")
+    git_repository_url: str | None = Query(
+        None, description="Filter by repository URL"
+    ),
+    git_branch: str | None = Query(None, description="Filter by git branch"),
 ):
     """Get underlying issues affecting multiple different tests."""
     try:
-        return {"results": get_underlying_issues(days, min_tests, git_repository_url, git_branch)}
+        return {
+            "results": get_underlying_issues(
+                days, min_tests, git_repository_url, git_branch
+            )
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to analyze underlying issues: {e!s}"
@@ -381,29 +404,33 @@ async def analyze_all(days: int = 7):
 
 @app.get("/api/v1/problematic-tests")
 async def get_problematic_tests_endpoint(
-    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
+    git_repository_url: str | None = Query(
+        None, description="Filter by repository URL"
+    ),
     git_branch: str | None = Query(None, description="Filter by git branch"),
     days: int = Query(7, description="Number of days to look back for analysis"),
-    min_failure_rate: float = Query(0.3, description="Minimum failure rate (0.0 to 1.0) to consider a test problematic"),
-    min_runs: int = Query(3, description="Minimum number of runs required to analyze a test"),
-    format: str = Query("detailed", description="Response format: 'detailed' or 'fqn_only'")
+    min_runs: int = Query(
+        3, description="Minimum number of runs required to analyze a test"
+    ),
+    detailed: bool = Query(
+        True, description="Return detailed information (True) or just test FQNs (False)"
+    ),
 ):
     """
     Get tests that are currently having issues and should be marked as expected failures.
-    
+
     This endpoint combines results from existing analysis queries (flaky tests, cross-branch
     failures, and underlying issues) to identify problematic tests. It's designed to be called
     by pytest plugins at session start to get a list of tests that should be marked as
     expected failures (xfail) so they don't fail the CI build.
-    
+
     Args:
         git_repository_url: Filter by specific repository (optional)
-        git_branch: Filter by specific branch (optional) 
+        git_branch: Filter by specific branch (optional)
         days: Number of days to look back for analysis
-        min_failure_rate: Minimum failure rate to consider a test problematic
         min_runs: Minimum number of runs required to analyze a test
-        format: Response format - 'detailed' returns full info, 'fqn_only' returns just test names
-        
+        detailed: Return detailed information (True) or just test FQNs (False)
+
     Returns:
         List of problematic tests with their details or just their FQNs
     """
@@ -412,11 +439,10 @@ async def get_problematic_tests_endpoint(
             git_repository_url=git_repository_url,
             git_branch=git_branch,
             days=days,
-            min_failure_rate=min_failure_rate,
-            min_runs=min_runs
+            min_runs=min_runs,
         )
-        
-        if format == "fqn_only":
+
+        if not detailed:
             # Return just the test FQNs for easy consumption by pytest plugin
             return {
                 "problematic_test_fqns": [test["test_fqn"] for test in results],
@@ -425,9 +451,8 @@ async def get_problematic_tests_endpoint(
                     "git_repository_url": git_repository_url,
                     "git_branch": git_branch,
                     "days": days,
-                    "min_failure_rate": min_failure_rate,
-                    "min_runs": min_runs
-                }
+                    "min_runs": min_runs,
+                },
             }
         else:
             # Return detailed information
@@ -438,11 +463,10 @@ async def get_problematic_tests_endpoint(
                     "git_repository_url": git_repository_url,
                     "git_branch": git_branch,
                     "days": days,
-                    "min_failure_rate": min_failure_rate,
-                    "min_runs": min_runs
-                }
+                    "min_runs": min_runs,
+                },
             }
-            
+
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to get problematic tests: {e!s}"
@@ -695,7 +719,7 @@ async def get_test_result_detail(test_result_id: int):
             if test_result["env_vars"]:
                 with contextlib.suppress(Exception):
                     test_result["env_vars"] = json.loads(test_result["env_vars"])
-            
+
             return test_result
 
     except HTTPException:
@@ -777,7 +801,10 @@ async def get_related_test_runs(test_result_id: int):
 async def serve_interface():
     """Serve the interactive HTML interface."""
     import aiofiles
-    async with aiofiles.open(Path(__file__).parent / "templates" / "interface.html") as f:
+
+    async with aiofiles.open(
+        Path(__file__).parent / "templates" / "interface.html"
+    ) as f:
         html_content = await f.read()
     return HTMLResponse(content=html_content)
 

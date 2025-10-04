@@ -115,7 +115,6 @@ Combines results from flaky tests, cross-branch failures, and underlying issues 
 
 #### Problematic Tests Integration
 - `CI_VIZ_PROBLEMATIC_DAYS`: Days to look back for problematic test analysis (default: `7`)
-- `CI_VIZ_MIN_FAILURE_RATE`: Minimum failure rate to consider a test problematic (default: `0.3`)
 - `CI_VIZ_MIN_RUNS`: Minimum runs required to analyze a test (default: `3`)
 
 ### Query Parameters
@@ -129,11 +128,21 @@ All analysis endpoints support these parameters:
 The system uses a fully denormalized SQLite schema (`test_results` table) that stores all data in a single table:
 
 - **Test Identification**: Test ID, name, FQN, module, suite, file path, line number
-- **Test Execution**: Status, message, traceback, durations, start time
+- **Test Execution**: Status, message, traceback, durations, start time, problematic marker
 - **Session Information**: Unique session ID, timestamps, duration
 - **Git Information**: Repository, branch, commit hash, author, message, timestamp
 - **Environment**: Python version, platform, architecture, dependencies, environment variables
 - **CI Information**: CI system details, job URLs, pipeline information, trigger, PR number
+
+### Test Statuses
+
+The system recognizes the following test statuses:
+- `passed` - Test succeeded
+- `failed` - Test failed
+- `error` - Test encountered an error
+- `skipped` - Test was skipped
+- `xfailed` - Test was expected to fail (marked as problematic) and did fail
+- `xpassed` - Test was expected to fail (marked as problematic) but passed (improvement detected!)
 
 This denormalized approach enables fast queries across all dimensions without complex joins.
 
@@ -154,8 +163,8 @@ curl "http://localhost:8000/api/v1/analysis/time-regressions?threshold_multiplie
 # Get comprehensive analysis
 curl "http://localhost:8000/api/v1/analysis/all?days=30"
 
-# Get problematic tests for CI integration
-curl "http://localhost:8000/api/v1/problematic-tests?git_branch=main&format=fqn_only"
+# Get problematic tests for CI integration (just test FQNs)
+curl "http://localhost:8000/api/v1/problematic-tests?git_branch=main&detailed=false"
 ```
 
 ### Custom Test Data
@@ -223,7 +232,6 @@ export CI_VIZ_DEBUG="true"
 
 # Problematic test detection tuning
 export CI_VIZ_PROBLEMATIC_DAYS="7"        # Days of history to analyze
-export CI_VIZ_MIN_FAILURE_RATE="0.3"      # 30% failure rate threshold
 export CI_VIZ_MIN_RUNS="3"                # Minimum runs to consider a test
 ```
 
@@ -240,7 +248,13 @@ hatch run ci-viz-load-fixtures
 hatch run pytest tests/ -v
 
 # Check what tests were marked as problematic
-curl "http://localhost:8000/api/v1/problematic-tests?git_branch=main&format=fqn_only"
+curl "http://localhost:8000/api/v1/problematic-tests?git_branch=main&detailed=false"
+
+# Query for xfailed tests (tests that were marked problematic and failed as expected)
+curl "http://localhost:8000/api/v1/test-results/?test_status=xfailed&limit=10"
+
+# Query for xpassed tests (tests that were marked problematic but passed - improvement!)
+curl "http://localhost:8000/api/v1/test-results/?test_status=xpassed&limit=10"
 ```
 
 ### Benefits
@@ -258,9 +272,8 @@ The `/api/v1/problematic-tests` endpoint supports:
 - **Repository filtering**: `git_repository_url` parameter
 - **Branch filtering**: `git_branch` parameter  
 - **Time window**: `days` parameter (default: 7)
-- **Failure threshold**: `min_failure_rate` parameter (default: 0.3)
 - **Minimum runs**: `min_runs` parameter (default: 3)
-- **Output format**: `format=fqn_only` for just test names, `format=detailed` for full analysis
+- **Output format**: `detailed=false` for just test FQNs, `detailed=true` for full analysis
 
 ## Development
 

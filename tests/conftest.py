@@ -18,77 +18,59 @@ PROBLEMATIC_TESTS = set()  # Cache for problematic test FQNs
 
 def fetch_problematic_tests():
     """Fetch list of problematic tests from CI Viz service."""
-    global PROBLEMATIC_TESTS  # noqa: PLW0603
-    
+    global PROBLEMATIC_TESTS
+
     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
-    
+
     # Get git info to filter problematic tests by repo and branch
     git_info = get_git_info()
     git_repository_url = git_info.get("git_repository_url")
     git_branch = git_info.get("git_branch")
-    
+
     # Skip if we don't have git info or if it's unknown
     if not git_repository_url or git_repository_url == "unknown":
-        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-            print("CI Viz: Skipping problematic tests fetch - no git repository info")
-        return
+        return  # No repository info available, can't filter problematic tests
         
     if not git_branch or git_branch == "unknown":
-        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-            print("CI Viz: Skipping problematic tests fetch - no git branch info")
-        return
-    
+        return  # No branch info available, can't filter problematic tests
+
     try:
         # Build URL with query parameters
         params = {
             "git_repository_url": git_repository_url,
             "git_branch": git_branch,
-            "format": "fqn_only",
+            "detailed": "false",  # We only need test FQNs, not full details
             "days": os.environ.get("CI_VIZ_PROBLEMATIC_DAYS", "7"),
-            "min_failure_rate": os.environ.get("CI_VIZ_MIN_FAILURE_RATE", "0.3"),
             "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3")
         }
-        
+
         query_string = urllib.parse.urlencode(params)
         url = f"{ci_viz_url}/api/v1/problematic-tests?{query_string}"
-        
+
         req = urllib.request.Request(url, method="GET")
-        
+
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode('utf-8'))
                 problematic_fqns = data.get("problematic_test_fqns", [])
                 PROBLEMATIC_TESTS.update(problematic_fqns)
-                
-                if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-                    print(f"CI Viz: Found {len(problematic_fqns)} problematic tests for {git_branch} branch")
-                    if problematic_fqns:
-                        print(f"CI Viz: Problematic tests: {', '.join(problematic_fqns)}")
-            else:
-                if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-                    print(f"CI Viz: Failed to fetch problematic tests - HTTP {response.status}")
-                    
-    except urllib.error.URLError as e:
-        if isinstance(e, urllib.error.ConnectionRefusedError):
-            if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-                print("CI Viz: Service not available for problematic tests fetch")
-        else:
-            if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-                print(f"CI Viz: Network error fetching problematic tests: {e}")
+            # Non-200 responses are silently ignored
+
+    except urllib.error.URLError:
         # Don't fail the test run if CI Viz is unavailable
-    except (urllib.error.HTTPError, json.JSONDecodeError, ValueError) as e:
-        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-            print(f"CI Viz: Error fetching problematic tests: {e}")
+        pass
+    except (urllib.error.HTTPError, json.JSONDecodeError, ValueError):
         # Don't fail the test run if CI Viz has issues
+        pass
 
 
 def pytest_sessionstart(session):  # noqa: ARG001
     """Capture session start info and fetch problematic tests."""
     global TEST_DATA  # noqa: PLW0603
-    
+
     # Fetch problematic tests first
     fetch_problematic_tests()
-    
+
     TEST_DATA = {
         "session_id": str(uuid.uuid4()),
         "session_start_time": datetime.now(UTC).isoformat(),
@@ -102,23 +84,23 @@ def pytest_sessionstart(session):  # noqa: ARG001
 def pytest_runtest_setup(item):
     """Mark problematic tests as expected failures before they run."""
     test_fqn = item.nodeid
-    
+
     # Check if this test is in our problematic tests list
     if test_fqn in PROBLEMATIC_TESTS:
         # Add xfail marker to this test
         xfail_marker = pytest.mark.xfail(
-            reason=f"Test marked as problematic by CI Viz (known to be flaky or consistently failing)",
+            reason="Test marked as problematic by CI Viz (known to be flaky or consistently failing)",
             strict=False  # Allow the test to pass unexpectedly (which is good news!)
         )
         item.add_marker(xfail_marker)
-        
-        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-            print(f"CI Viz: Marked {test_fqn} as expected failure (xfail)")
 
 
 def pytest_runtest_logreport(report):
     """Capture individual test results."""
     if report.when == "call":  # Only capture the main test execution
+        # Check if this test was marked as problematic by CI Viz
+        was_marked_problematic = report.nodeid in PROBLEMATIC_TESTS
+        
         test_result = {
             "test_id": report.nodeid,
             "test_name": report.nodeid.split("::")[-1],
@@ -133,6 +115,7 @@ def pytest_runtest_logreport(report):
             "test_start_time": datetime.now(UTC).isoformat(),
             "test_file_path": str(report.fspath) if hasattr(report, "fspath") else None,
             "test_line_number": report.location[1] if report.location else None,
+            "was_marked_problematic": was_marked_problematic,  # Track if CI Viz marked this as problematic
         }
         TEST_DATA["test_results"].append(test_result)
 
@@ -222,17 +205,20 @@ def get_ci_info():
 
 def map_pytest_outcome(outcome):
     """Map pytest outcomes to CI Viz status."""
-    mapping = {"passed": "passed", "failed": "failed", "skipped": "skipped", "error": "error"}
+    mapping = {
+        "passed": "passed",
+        "failed": "failed",
+        "skipped": "skipped",
+        "error": "error",
+        "xfailed": "xfailed",  # Expected failure that failed (marked as problematic)
+        "xpassed": "xpassed",  # Expected failure that passed (test improved!)
+    }
     return mapping.get(outcome, "error")
 
 
 def send_to_ci_viz(data):
     """Send test session data to CI Viz."""
     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
-
-    # Print data for debugging (can be disabled with env var)
-    if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
-        pass
 
     try:
         # Convert session data to individual test results
@@ -253,6 +239,7 @@ def send_to_ci_viz(data):
                 "test_total_duration": test_result["test_total_duration"],
                 "test_call_duration": test_result["test_call_duration"],
                 "test_start_time": test_result["test_start_time"],
+                "was_marked_problematic": test_result.get("was_marked_problematic", False),
                 # Session information
                 "session_id": data["session_id"],
                 "session_start_time": data["session_start_time"],
@@ -290,18 +277,12 @@ def send_to_ci_viz(data):
 
         req = urllib.request.Request(url, data=json_data, headers={"Content-Type": "application/json"}, method="POST")
 
-        with urllib.request.urlopen(req, timeout=30) as response:
-            if response.status == 200:
-                pass
-            else:
-                pass
+        with urllib.request.urlopen(req, timeout=30):
+            pass  # Successfully sent, no further action needed
 
-    except urllib.error.URLError as e:
-        if isinstance(e, urllib.error.ConnectionRefusedError):
-            pass
-        else:
-            pass
+    except urllib.error.URLError:
         # Don't fail the test run if CI Viz is unavailable
-    except (urllib.error.HTTPError, json.JSONDecodeError, ValueError):
         pass
+    except (urllib.error.HTTPError, json.JSONDecodeError, ValueError):
         # Don't fail the test run if CI Viz is unavailable
+        pass

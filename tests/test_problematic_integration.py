@@ -15,7 +15,8 @@ def test_flaky_example():
     # This test will fail ~30% of the time to simulate flakiness
     # In a real scenario, this would be replaced by actual problematic tests
     if random.random() < 0.3:
-        assert False, "Simulated flaky test failure"
+        msg = "Simulated flaky test failure"
+        raise AssertionError(msg)
     assert True
 
 
@@ -28,5 +29,6 @@ def test_another_flaky_example():
     """Another flaky test for demonstration."""
     # This test will fail ~40% of the time
     if random.random() < 0.4:
-        assert False, "Another simulated flaky test failure"
+        msg = "Another simulated flaky test failure"
+        raise AssertionError(msg)
     assert True
