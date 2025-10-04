@@ -71,6 +71,9 @@ The project includes several hatch scripts for easy management:
 - `GET /api/v1/analysis/test-order-correlations` - Test execution order impact on failures
 - `GET /api/v1/analysis/all` - Run all analyses
 
+### CI Integration Endpoints
+- `GET /api/v1/problematic-tests` - Get tests currently having issues (for pytest plugin integration)
+
 ## Sample Queries Explained
 
 ### 1. Flaky Tests
@@ -98,12 +101,22 @@ Analyzes whether certain test execution orders correlate with failures.
 
 **Use case**: Find tests that have hidden dependencies or side effects.
 
+### 6. Problematic Tests Integration
+Combines results from flaky tests, cross-branch failures, and underlying issues analyses to identify tests that should be marked as expected failures in CI.
+
+**Use case**: Prevent known problematic tests from failing CI builds while they're being fixed.
+
 ## Configuration
 
 ### Environment Variables
 
 - `CI_VIZ_URL`: URL of the CI Viz service (default: `http://localhost:8000`)
 - `CI_VIZ_DEBUG`: Enable debug output (default: `true`)
+
+#### Problematic Tests Integration
+- `CI_VIZ_PROBLEMATIC_DAYS`: Days to look back for problematic test analysis (default: `7`)
+- `CI_VIZ_MIN_FAILURE_RATE`: Minimum failure rate to consider a test problematic (default: `0.3`)
+- `CI_VIZ_MIN_RUNS`: Minimum runs required to analyze a test (default: `3`)
 
 ### Query Parameters
 
@@ -140,6 +153,9 @@ curl "http://localhost:8000/api/v1/analysis/time-regressions?threshold_multiplie
 
 # Get comprehensive analysis
 curl "http://localhost:8000/api/v1/analysis/all?days=30"
+
+# Get problematic tests for CI integration
+curl "http://localhost:8000/api/v1/problematic-tests?git_branch=main&format=fqn_only"
 ```
 
 ### Custom Test Data
@@ -181,6 +197,70 @@ data = json.dumps(test_results).encode('utf-8')
 req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
 response = urllib.request.urlopen(req)
 ```
+
+## CI Integration: Problematic Tests Auto-Detection
+
+The CI Viz system includes an advanced feature that automatically identifies problematic tests and marks them as expected failures during pytest runs. This prevents known flaky or consistently failing tests from breaking your CI pipeline while they're being investigated and fixed.
+
+### How It Works
+
+1. **At Session Start**: The pytest plugin calls the `/api/v1/problematic-tests` endpoint
+2. **Analysis**: The system combines results from existing analysis queries to identify:
+   - **Flaky tests**: From the flaky tests analysis (same test, same commit, different outcomes)
+   - **Cross-branch failures**: From the cross-branch analysis (same error across branches)
+   - **Systemic issues**: From the underlying issues analysis (common errors affecting multiple tests)
+3. **Auto-marking**: Problematic tests are automatically marked with `pytest.mark.xfail`
+4. **CI Protection**: These tests won't fail your CI build, but you'll still see their results
+
+### Configuration
+
+The integration is controlled by environment variables:
+
+```bash
+# Basic configuration
+export CI_VIZ_URL="http://localhost:8000"
+export CI_VIZ_DEBUG="true"
+
+# Problematic test detection tuning
+export CI_VIZ_PROBLEMATIC_DAYS="7"        # Days of history to analyze
+export CI_VIZ_MIN_FAILURE_RATE="0.3"      # 30% failure rate threshold
+export CI_VIZ_MIN_RUNS="3"                # Minimum runs to consider a test
+```
+
+### Example Usage
+
+```bash
+# Start the CI Viz service
+hatch run python -m ci_viz_simple.main
+
+# Load some demo data to see the feature in action
+hatch run ci-viz-load-fixtures
+
+# Run tests - problematic tests will be auto-detected and marked as xfail
+hatch run pytest tests/ -v
+
+# Check what tests were marked as problematic
+curl "http://localhost:8000/api/v1/problematic-tests?git_branch=main&format=fqn_only"
+```
+
+### Benefits
+
+- **Stable CI**: Known problematic tests won't break your builds
+- **Visibility**: You still see test results and can track improvements
+- **Automatic**: No manual maintenance of xfail markers
+- **Data-driven**: Based on actual test execution history
+- **Flexible**: Configurable thresholds for different project needs
+
+### API Endpoint Details
+
+The `/api/v1/problematic-tests` endpoint supports:
+
+- **Repository filtering**: `git_repository_url` parameter
+- **Branch filtering**: `git_branch` parameter  
+- **Time window**: `days` parameter (default: 7)
+- **Failure threshold**: `min_failure_rate` parameter (default: 0.3)
+- **Minimum runs**: `min_runs` parameter (default: 3)
+- **Output format**: `format=fqn_only` for just test names, `format=detailed` for full analysis
 
 ## Development
 
@@ -224,7 +304,8 @@ This system demonstrates several key concepts:
 2. **Data-Driven Decisions**: Using test execution data to improve reliability
 3. **Pattern Recognition**: Automated detection of common failure modes
 4. **CI/CD Integration**: Seamless integration with existing test workflows
-5. **Modern Python**: Using latest Python features and best practices
+5. **Closing the Loop**: Automatic CI protection based on test history analysis
+6. **Modern Python**: Using latest Python features and best practices
 
 ## Future Enhancements
 

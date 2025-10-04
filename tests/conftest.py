@@ -10,12 +10,85 @@ import urllib.request
 import uuid
 from datetime import UTC, datetime
 
+import pytest
+
 TEST_DATA = {}
+PROBLEMATIC_TESTS = set()  # Cache for problematic test FQNs
+
+
+def fetch_problematic_tests():
+    """Fetch list of problematic tests from CI Viz service."""
+    global PROBLEMATIC_TESTS  # noqa: PLW0603
+    
+    ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
+    
+    # Get git info to filter problematic tests by repo and branch
+    git_info = get_git_info()
+    git_repository_url = git_info.get("git_repository_url")
+    git_branch = git_info.get("git_branch")
+    
+    # Skip if we don't have git info or if it's unknown
+    if not git_repository_url or git_repository_url == "unknown":
+        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+            print("CI Viz: Skipping problematic tests fetch - no git repository info")
+        return
+        
+    if not git_branch or git_branch == "unknown":
+        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+            print("CI Viz: Skipping problematic tests fetch - no git branch info")
+        return
+    
+    try:
+        # Build URL with query parameters
+        params = {
+            "git_repository_url": git_repository_url,
+            "git_branch": git_branch,
+            "format": "fqn_only",
+            "days": os.environ.get("CI_VIZ_PROBLEMATIC_DAYS", "7"),
+            "min_failure_rate": os.environ.get("CI_VIZ_MIN_FAILURE_RATE", "0.3"),
+            "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3")
+        }
+        
+        query_string = urllib.parse.urlencode(params)
+        url = f"{ci_viz_url}/api/v1/problematic-tests?{query_string}"
+        
+        req = urllib.request.Request(url, method="GET")
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode('utf-8'))
+                problematic_fqns = data.get("problematic_test_fqns", [])
+                PROBLEMATIC_TESTS.update(problematic_fqns)
+                
+                if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+                    print(f"CI Viz: Found {len(problematic_fqns)} problematic tests for {git_branch} branch")
+                    if problematic_fqns:
+                        print(f"CI Viz: Problematic tests: {', '.join(problematic_fqns)}")
+            else:
+                if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+                    print(f"CI Viz: Failed to fetch problematic tests - HTTP {response.status}")
+                    
+    except urllib.error.URLError as e:
+        if isinstance(e, urllib.error.ConnectionRefusedError):
+            if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+                print("CI Viz: Service not available for problematic tests fetch")
+        else:
+            if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+                print(f"CI Viz: Network error fetching problematic tests: {e}")
+        # Don't fail the test run if CI Viz is unavailable
+    except (urllib.error.HTTPError, json.JSONDecodeError, ValueError) as e:
+        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+            print(f"CI Viz: Error fetching problematic tests: {e}")
+        # Don't fail the test run if CI Viz has issues
 
 
 def pytest_sessionstart(session):  # noqa: ARG001
-    """Capture session start info."""
+    """Capture session start info and fetch problematic tests."""
     global TEST_DATA  # noqa: PLW0603
+    
+    # Fetch problematic tests first
+    fetch_problematic_tests()
+    
     TEST_DATA = {
         "session_id": str(uuid.uuid4()),
         "session_start_time": datetime.now(UTC).isoformat(),
@@ -24,6 +97,23 @@ def pytest_sessionstart(session):  # noqa: ARG001
         "ci_info": get_ci_info(),
         "test_results": [],
     }
+
+
+def pytest_runtest_setup(item):
+    """Mark problematic tests as expected failures before they run."""
+    test_fqn = item.nodeid
+    
+    # Check if this test is in our problematic tests list
+    if test_fqn in PROBLEMATIC_TESTS:
+        # Add xfail marker to this test
+        xfail_marker = pytest.mark.xfail(
+            reason=f"Test marked as problematic by CI Viz (known to be flaky or consistently failing)",
+            strict=False  # Allow the test to pass unexpectedly (which is good news!)
+        )
+        item.add_marker(xfail_marker)
+        
+        if os.environ.get("CI_VIZ_DEBUG", "true").lower() == "true":
+            print(f"CI Viz: Marked {test_fqn} as expected failure (xfail)")
 
 
 def pytest_runtest_logreport(report):

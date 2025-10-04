@@ -31,7 +31,12 @@ def _execute_query(query: str, params: tuple) -> list[tuple]:
         conn.close()
 
 
-def get_flaky_tests(days: int = 7, min_runs: int = 3) -> list[dict[str, t.Any]]:
+def get_flaky_tests(
+    days: int = 7, 
+    min_runs: int = 3,
+    git_repository_url: str | None = None,
+    git_branch: str | None = None
+) -> list[dict[str, t.Any]]:
     """
     Query 1: Flaky tests - Tests that have both passing and failing runs for the same commit.
 
@@ -43,14 +48,35 @@ def get_flaky_tests(days: int = 7, min_runs: int = 3) -> list[dict[str, t.Any]]:
     Args:
         days: Number of days to look back for test runs
         min_runs: Minimum number of runs required to consider a test for flakiness analysis
+        git_repository_url: Filter by specific repository (optional)
+        git_branch: Filter by specific branch (optional)
 
     Returns:
         List of dictionaries containing flaky test information
     """
     # Calculate date threshold
     date_threshold = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    
+    # Build WHERE clause dynamically based on provided filters
+    where_conditions = [
+        "test_start_time >= ?",
+        "git_commit_hash IS NOT NULL",
+        "git_commit_hash != 'unknown'",
+        "test_status IN ('passed', 'failed', 'error', 'skipped')"
+    ]
+    params = [date_threshold]
+    
+    if git_repository_url:
+        where_conditions.append("git_repository_url = ?")
+        params.append(git_repository_url)
+        
+    if git_branch:
+        where_conditions.append("git_branch = ?")
+        params.append(git_branch)
+    
+    where_clause = " AND ".join(where_conditions)
 
-    query = """
+    query = f"""
         -- CTE (Common Table Expression) to group test runs by test and commit
         WITH test_runs_by_commit AS (
             SELECT
@@ -74,10 +100,7 @@ def get_flaky_tests(days: int = 7, min_runs: int = 3) -> list[dict[str, t.Any]]:
                 COUNT(DISTINCT session_id) as session_count
 
             FROM test_results
-            WHERE test_start_time >= ?                    -- Only look at recent runs (within specified days)
-                AND git_commit_hash IS NOT NULL           -- Exclude runs without git info
-                AND git_commit_hash != 'unknown'          -- Exclude placeholder git info
-                AND test_status IN ('passed', 'failed', 'error', 'skipped')  -- Only valid statuses
+            WHERE {where_clause}
 
             -- GROUP BY groups rows with the same test_fqn AND git_commit_hash together
             -- This means we're looking at all runs of the same test on the same commit
@@ -107,7 +130,10 @@ def get_flaky_tests(days: int = 7, min_runs: int = 3) -> list[dict[str, t.Any]]:
         ORDER BY total_runs DESC, failed_count DESC
     """
 
-    results = _execute_query(query, (date_threshold, min_runs))
+    # Add min_runs to params
+    params.append(min_runs)
+    
+    results = _execute_query(query, tuple(params))
 
     return [
         {
@@ -126,7 +152,12 @@ def get_flaky_tests(days: int = 7, min_runs: int = 3) -> list[dict[str, t.Any]]:
     ]
 
 
-def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -> list[dict[str, t.Any]]:
+def get_failing_tests_across_branches(
+    days: int = 7, 
+    min_occurrences: int = 2,
+    git_repository_url: str | None = None,
+    git_branch: str | None = None
+) -> list[dict[str, t.Any]]:
     """
     Query 2: Failing tests across branches - Tests that fail with the same error
     across multiple branches, indicating a systemic issue.
@@ -139,13 +170,36 @@ def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -
     Args:
         days: Number of days to look back for test runs
         min_occurrences: Minimum number of failures required to include a test
+        git_repository_url: Filter by specific repository (optional)
+        git_branch: Filter by specific branch (optional) - Note: for cross-branch analysis, this limits the branches considered
 
     Returns:
         List of dictionaries containing cross-branch failure information
     """
     date_threshold = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    
+    # Build WHERE clause dynamically based on provided filters
+    where_conditions = [
+        "test_start_time >= ?",
+        "test_status IN ('failed', 'error')",
+        "test_traceback IS NOT NULL",
+        "test_traceback != ''",
+        "git_branch IS NOT NULL",
+        "git_branch != 'unknown'"
+    ]
+    params = [date_threshold]
+    
+    if git_repository_url:
+        where_conditions.append("git_repository_url = ?")
+        params.append(git_repository_url)
+        
+    if git_branch:
+        where_conditions.append("git_branch = ?")
+        params.append(git_branch)
+    
+    where_clause = " AND ".join(where_conditions)
 
-    query = """
+    query = f"""
         -- CTE to find tests that fail with the same error across multiple branches
         WITH failing_tests_by_traceback AS (
             SELECT
@@ -166,12 +220,7 @@ def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -
                 GROUP_CONCAT(DISTINCT git_branch) as branch_list
 
             FROM test_results
-            WHERE test_start_time >= ?              -- Only recent failures
-                AND test_status IN ('failed', 'error')  -- Only actual failures (not skipped)
-                AND test_traceback IS NOT NULL      -- Must have error details
-                AND test_traceback != ''            -- Must have non-empty error details
-                AND git_branch IS NOT NULL          -- Must have branch info
-                AND git_branch != 'unknown'         -- Must have real branch info
+            WHERE {where_clause}
 
             -- GROUP BY test_fqn AND test_traceback means we're grouping by:
             -- "same test failing with identical error message"
@@ -196,7 +245,10 @@ def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -
         ORDER BY affected_branches DESC, total_failures DESC
     """
 
-    results = _execute_query(query, (date_threshold, min_occurrences))
+    # Add min_occurrences to params
+    params.append(min_occurrences)
+    
+    results = _execute_query(query, tuple(params))
 
     return [
         {
@@ -212,7 +264,12 @@ def get_failing_tests_across_branches(days: int = 7, min_occurrences: int = 2) -
     ]
 
 
-def get_underlying_issues(days: int = 7, min_tests: int = 2) -> list[dict[str, t.Any]]:
+def get_underlying_issues(
+    days: int = 7, 
+    min_tests: int = 2,
+    git_repository_url: str | None = None,
+    git_branch: str | None = None
+) -> list[dict[str, t.Any]]:
     """
     Query 3: Underlying issues - Common error patterns affecting multiple tests across branches.
 
@@ -229,13 +286,36 @@ def get_underlying_issues(days: int = 7, min_tests: int = 2) -> list[dict[str, t
     Args:
         days: Number of days to look back for test runs
         min_tests: Minimum number of different tests that must be affected
+        git_repository_url: Filter by specific repository (optional)
+        git_branch: Filter by specific branch (optional)
 
     Returns:
         List of dictionaries containing underlying issue information
     """
     date_threshold = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    
+    # Build WHERE clause dynamically based on provided filters
+    where_conditions = [
+        "test_start_time >= ?",
+        "test_status IN ('failed', 'error')",
+        "test_traceback IS NOT NULL",
+        "test_traceback != ''",
+        "git_branch IS NOT NULL",
+        "git_branch != 'unknown'"
+    ]
+    params = [date_threshold]
+    
+    if git_repository_url:
+        where_conditions.append("git_repository_url = ?")
+        params.append(git_repository_url)
+        
+    if git_branch:
+        where_conditions.append("git_branch = ?")
+        params.append(git_branch)
+    
+    where_clause = " AND ".join(where_conditions)
 
-    query = """
+    query = f"""
         -- CTE to find common error patterns affecting multiple different tests
         WITH common_failures AS (
             SELECT
@@ -259,12 +339,7 @@ def get_underlying_issues(days: int = 7, min_tests: int = 2) -> list[dict[str, t
                 GROUP_CONCAT(DISTINCT git_branch) as branch_list
 
             FROM test_results
-            WHERE test_start_time >= ?              -- Only recent failures
-                AND test_status IN ('failed', 'error')  -- Only actual failures
-                AND test_traceback IS NOT NULL      -- Must have error details
-                AND test_traceback != ''            -- Must have non-empty error details
-                AND git_branch IS NOT NULL          -- Must have branch info
-                AND git_branch != 'unknown'         -- Must have real branch info
+            WHERE {where_clause}
 
             -- GROUP BY test_traceback means we're grouping by:
             -- "identical error traceback" (regardless of which test it came from)
@@ -291,7 +366,10 @@ def get_underlying_issues(days: int = 7, min_tests: int = 2) -> list[dict[str, t
         ORDER BY affected_tests DESC, affected_branches DESC, total_failures DESC
     """
 
-    results = _execute_query(query, (date_threshold, min_tests))
+    # Add min_tests to params
+    params.append(min_tests)
+    
+    results = _execute_query(query, tuple(params))
 
     return [
         {
@@ -539,6 +617,148 @@ def get_test_order_correlations(days: int = 7, min_correlation: float = 0.7) -> 
         }
         for row in results
     ]
+
+
+def get_problematic_tests(
+    git_repository_url: str | None = None,
+    git_branch: str | None = None,
+    days: int = 7,
+    min_failure_rate: float = 0.3,
+    min_runs: int = 3
+) -> list[dict[str, t.Any]]:
+    """
+    Identify problematic tests by combining results from existing analysis queries.
+    
+    This function leverages the existing well-tested queries to identify tests that should
+    be marked as expected failures in CI:
+    - Flaky tests (from get_flaky_tests)
+    - Cross-branch failing tests (from get_failing_tests_across_branches) 
+    - Tests affected by underlying issues (from get_underlying_issues)
+    
+    Args:
+        git_repository_url: Filter by specific repository (optional)
+        git_branch: Filter by specific branch (optional)
+        days: Number of days to look back for analysis
+        min_failure_rate: Minimum failure rate (0.0 to 1.0) to consider a test problematic
+        min_runs: Minimum number of runs required to analyze a test
+        
+    Returns:
+        List of dictionaries containing problematic test information
+    """
+    problematic_tests = {}  # Use dict to deduplicate by test_fqn
+    
+    # 1. Get flaky tests - these are definitely problematic
+    flaky_tests = get_flaky_tests(
+        days=days, 
+        min_runs=min_runs,
+        git_repository_url=git_repository_url,
+        git_branch=git_branch
+    )
+    for test in flaky_tests:
+        test_fqn = test["test_fqn"]
+        problematic_tests[test_fqn] = {
+            "test_fqn": test_fqn,
+            "problem_type": "flaky",
+            "confidence": "high" if test["total_runs"] >= 10 else "medium",
+            "total_runs": test["total_runs"],
+            "passed_count": test["passed_count"],
+            "failed_count": test["failed_count"],
+            "failure_rate": round(100 - test["pass_rate"], 1),
+            "first_run": test["first_run"],
+            "last_run": test["last_run"],
+            "session_count": test["session_count"],
+            "git_commit_hash": test["git_commit_hash"],
+            "source_analysis": "flaky_tests"
+        }
+    
+    # 2. Get tests failing across branches - these indicate systemic issues
+    cross_branch_tests = get_failing_tests_across_branches(
+        days=days, 
+        min_occurrences=2,
+        git_repository_url=git_repository_url,
+        git_branch=git_branch
+    )
+    for test in cross_branch_tests:
+        test_fqn = test["test_fqn"]
+        
+        # If already identified as flaky, upgrade to flaky_and_failing
+        if test_fqn in problematic_tests:
+            problematic_tests[test_fqn]["problem_type"] = "flaky_and_failing"
+            problematic_tests[test_fqn]["source_analysis"] += ", cross_branch_failures"
+        else:
+            problematic_tests[test_fqn] = {
+                "test_fqn": test_fqn,
+                "problem_type": "cross_branch_failing",
+                "confidence": "high" if test["total_failures"] >= 5 else "medium",
+                "total_runs": test["total_failures"],  # Only failures recorded here
+                "passed_count": 0,  # Not available from this query
+                "failed_count": test["total_failures"],
+                "failure_rate": 100.0,  # All recorded runs are failures
+                "first_run": test["first_failure"],
+                "last_run": test["last_failure"],
+                "affected_branches": test["affected_branches"],
+                "branch_list": test["branch_list"],
+                "sample_error_preview": test["traceback_preview"],
+                "source_analysis": "cross_branch_failures"
+            }
+    
+    # 3. Get tests affected by underlying issues - these are systematically problematic
+    underlying_issues = get_underlying_issues(
+        days=days, 
+        min_tests=2,
+        git_repository_url=git_repository_url,
+        git_branch=git_branch
+    )
+    for issue in underlying_issues:
+        # Parse the test_list to get individual test FQNs
+        test_fqns = issue["test_list"].split(",") if issue["test_list"] else []
+        
+        for test_fqn in test_fqns:
+            test_fqn = test_fqn.strip()
+            if not test_fqn:
+                continue
+                
+            # If already identified, add this as additional context
+            if test_fqn in problematic_tests:
+                problematic_tests[test_fqn]["source_analysis"] += ", underlying_issues"
+                # Upgrade confidence if this test is affected by systemic issues
+                if problematic_tests[test_fqn]["confidence"] != "high":
+                    problematic_tests[test_fqn]["confidence"] = "high"
+            else:
+                problematic_tests[test_fqn] = {
+                    "test_fqn": test_fqn,
+                    "problem_type": "systemic_issue",
+                    "confidence": "high",  # Systemic issues are high confidence
+                    "total_runs": issue["total_failures"],  # Only failures recorded
+                    "passed_count": 0,  # Not available from this query
+                    "failed_count": issue["total_failures"],
+                    "failure_rate": 100.0,  # All recorded runs are failures
+                    "first_run": issue["first_occurrence"],
+                    "last_run": issue["last_occurrence"],
+                    "affected_tests": issue["affected_tests"],
+                    "affected_branches": issue["affected_branches"],
+                    "sample_error_preview": issue["traceback_preview"],
+                    "source_analysis": "underlying_issues"
+                }
+    
+    # Convert dict back to list and sort by priority
+    result_list = list(problematic_tests.values())
+    
+    # Sort by problem type priority, then by failure rate, then by total runs
+    priority_order = {
+        "flaky_and_failing": 1,
+        "systemic_issue": 2,
+        "cross_branch_failing": 3,
+        "flaky": 4
+    }
+    
+    result_list.sort(key=lambda x: (
+        priority_order.get(x["problem_type"], 5),
+        -x["failure_rate"],
+        -x["total_runs"]
+    ))
+    
+    return result_list
 
 
 def run_all_queries(days: int = 7) -> dict[str, t.Any]:

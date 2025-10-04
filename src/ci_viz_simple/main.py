@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from ci_viz_simple.queries import (
     get_failing_tests_across_branches,
     get_flaky_tests,
+    get_problematic_tests,
     get_test_order_correlations,
     get_test_time_regressions,
     get_underlying_issues,
@@ -152,12 +153,24 @@ def init_database():
 
     # Create indexes for common query patterns
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_test_fqn ON test_results(test_fqn)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_git_commit_hash ON test_results(git_commit_hash)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_git_branch ON test_results(git_branch)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_test_status ON test_results(test_status)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_session_id ON test_results(session_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_test_start_time ON test_results(test_start_time)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_test_traceback ON test_results(test_traceback)")
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_git_commit_hash ON test_results(git_commit_hash)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_git_branch ON test_results(git_branch)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_test_status ON test_results(test_status)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_id ON test_results(session_id)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_test_start_time ON test_results(test_start_time)"
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_test_traceback ON test_results(test_traceback)"
+    )
 
     conn.commit()
     conn.close()
@@ -243,7 +256,9 @@ async def ingest_test_results(test_results: list[TestResult]):
         return {"message": f"Successfully ingested {len(test_results)} test results"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to ingest test results: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to ingest test results: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/stats")
@@ -272,38 +287,63 @@ async def get_stats():
             "total_test_executions": total_tests,
             "failed_test_executions": failed_tests,
             "unique_tests": unique_tests,
-            "failure_rate": (round(failed_tests / total_tests * 100, 2) if total_tests > 0 else 0),
+            "failure_rate": (
+                round(failed_tests / total_tests * 100, 2) if total_tests > 0 else 0
+            ),
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get stats: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get stats: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/analysis/flaky-tests")
-async def analyze_flaky_tests(days: int = 7, min_runs: int = 3):
+async def analyze_flaky_tests(
+    days: int = 7, 
+    min_runs: int = 3,
+    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
+    git_branch: str | None = Query(None, description="Filter by git branch")
+):
     """Get flaky tests - tests that pass and fail for the same commit."""
     try:
-        return {"results": get_flaky_tests(days, min_runs)}
+        return {"results": get_flaky_tests(days, min_runs, git_repository_url, git_branch)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze flaky tests: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze flaky tests: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/analysis/failing-across-branches")
-async def analyze_failing_across_branches(days: int = 7, min_occurrences: int = 2):
+async def analyze_failing_across_branches(
+    days: int = 7, 
+    min_occurrences: int = 2,
+    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
+    git_branch: str | None = Query(None, description="Filter by git branch")
+):
     """Get tests failing with same error across different branches."""
     try:
-        return {"results": get_failing_tests_across_branches(days, min_occurrences)}
+        return {"results": get_failing_tests_across_branches(days, min_occurrences, git_repository_url, git_branch)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze cross-branch failures: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze cross-branch failures: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/analysis/underlying-issues")
-async def analyze_underlying_issues(days: int = 7, min_tests: int = 2):
+async def analyze_underlying_issues(
+    days: int = 7, 
+    min_tests: int = 2,
+    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
+    git_branch: str | None = Query(None, description="Filter by git branch")
+):
     """Get underlying issues affecting multiple different tests."""
     try:
-        return {"results": get_underlying_issues(days, min_tests)}
+        return {"results": get_underlying_issues(days, min_tests, git_repository_url, git_branch)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze underlying issues: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze underlying issues: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/analysis/time-regressions")
@@ -312,7 +352,9 @@ async def analyze_time_regressions(days: int = 7, threshold_multiplier: float = 
     try:
         return {"results": get_test_time_regressions(days, threshold_multiplier)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze time regressions: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze time regressions: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/analysis/test-order-correlations")
@@ -321,7 +363,9 @@ async def analyze_test_order_correlations(days: int = 7, min_correlation: float 
     try:
         return {"results": get_test_order_correlations(days, min_correlation)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze test order correlations: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze test order correlations: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/analysis/all")
@@ -330,16 +374,92 @@ async def analyze_all(days: int = 7):
     try:
         return run_all_queries(days)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to run analysis: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to run analysis: {e!s}"
+        ) from e
+
+
+@app.get("/api/v1/problematic-tests")
+async def get_problematic_tests_endpoint(
+    git_repository_url: str | None = Query(None, description="Filter by repository URL"),
+    git_branch: str | None = Query(None, description="Filter by git branch"),
+    days: int = Query(7, description="Number of days to look back for analysis"),
+    min_failure_rate: float = Query(0.3, description="Minimum failure rate (0.0 to 1.0) to consider a test problematic"),
+    min_runs: int = Query(3, description="Minimum number of runs required to analyze a test"),
+    format: str = Query("detailed", description="Response format: 'detailed' or 'fqn_only'")
+):
+    """
+    Get tests that are currently having issues and should be marked as expected failures.
+    
+    This endpoint combines results from existing analysis queries (flaky tests, cross-branch
+    failures, and underlying issues) to identify problematic tests. It's designed to be called
+    by pytest plugins at session start to get a list of tests that should be marked as
+    expected failures (xfail) so they don't fail the CI build.
+    
+    Args:
+        git_repository_url: Filter by specific repository (optional)
+        git_branch: Filter by specific branch (optional) 
+        days: Number of days to look back for analysis
+        min_failure_rate: Minimum failure rate to consider a test problematic
+        min_runs: Minimum number of runs required to analyze a test
+        format: Response format - 'detailed' returns full info, 'fqn_only' returns just test names
+        
+    Returns:
+        List of problematic tests with their details or just their FQNs
+    """
+    try:
+        results = get_problematic_tests(
+            git_repository_url=git_repository_url,
+            git_branch=git_branch,
+            days=days,
+            min_failure_rate=min_failure_rate,
+            min_runs=min_runs
+        )
+        
+        if format == "fqn_only":
+            # Return just the test FQNs for easy consumption by pytest plugin
+            return {
+                "problematic_test_fqns": [test["test_fqn"] for test in results],
+                "count": len(results),
+                "filters": {
+                    "git_repository_url": git_repository_url,
+                    "git_branch": git_branch,
+                    "days": days,
+                    "min_failure_rate": min_failure_rate,
+                    "min_runs": min_runs
+                }
+            }
+        else:
+            # Return detailed information
+            return {
+                "results": results,
+                "count": len(results),
+                "filters": {
+                    "git_repository_url": git_repository_url,
+                    "git_branch": git_branch,
+                    "days": days,
+                    "min_failure_rate": min_failure_rate,
+                    "min_runs": min_runs
+                }
+            }
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get problematic tests: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/test-results/")
 async def get_test_results(
-    test_name: str | None = Query(None, description="Filter by test name (partial match)"),
+    test_name: str | None = Query(
+        None, description="Filter by test name (partial match)"
+    ),
     test_status: str | None = Query(None, description="Filter by test status"),
     git_branch: str | None = Query(None, description="Filter by git branch"),
     git_commit_hash: str | None = Query(None, description="Filter by git commit hash"),
-    start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
+    start_date: str | None = Query(
+        None, description="Filter by start date (ISO format)"
+    ),
     end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
     sql_query: str | None = Query(None, description="SQL-like query for filtering"),
     limit: int = Query(100, description="Maximum number of results"),
@@ -361,7 +481,9 @@ async def get_test_results(
                 where_conditions.append(sql_where)
                 params.extend(sql_params)
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"SQL query error: {e!s}") from e
+                raise HTTPException(
+                    status_code=400, detail=f"SQL query error: {e!s}"
+                ) from e
         else:
             # Use individual filters
             if test_name:
@@ -388,7 +510,9 @@ async def get_test_results(
                 where_conditions.append("test_start_time <= ?")
                 params.append(end_date)
 
-        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+        where_clause = (
+            "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+        )
 
         # Get total count
         count_query = f"SELECT COUNT(*) FROM test_results {where_clause}"  # noqa: S608
@@ -464,7 +588,9 @@ async def get_test_results(
             # Convert JSON strings back to objects
             if test_result["env_dependencies"]:
                 with contextlib.suppress(Exception):
-                    test_result["env_dependencies"] = json.loads(test_result["env_dependencies"])
+                    test_result["env_dependencies"] = json.loads(
+                        test_result["env_dependencies"]
+                    )
             if test_result["env_vars"]:
                 with contextlib.suppress(Exception):
                     test_result["env_vars"] = json.loads(test_result["env_vars"])
@@ -479,7 +605,9 @@ async def get_test_results(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get test results: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get test results: {e!s}"
+        ) from e
 
 
 def _raise_not_found():
@@ -561,17 +689,21 @@ async def get_test_result_detail(test_result_id: int):
             # Convert JSON strings back to objects
             if test_result["env_dependencies"]:
                 with contextlib.suppress(Exception):
-                    test_result["env_dependencies"] = json.loads(test_result["env_dependencies"])
+                    test_result["env_dependencies"] = json.loads(
+                        test_result["env_dependencies"]
+                    )
             if test_result["env_vars"]:
                 with contextlib.suppress(Exception):
                     test_result["env_vars"] = json.loads(test_result["env_vars"])
-
+            
             return test_result
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get test result detail: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get test result detail: {e!s}"
+        ) from e
 
 
 @app.get("/api/v1/test-results/{test_result_id}/related")
@@ -636,14 +768,15 @@ async def get_related_test_runs(test_result_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get related test runs: {e!s}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get related test runs: {e!s}"
+        ) from e
 
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_interface():
     """Serve the interactive HTML interface."""
     import aiofiles
-
     async with aiofiles.open(Path(__file__).parent / "templates" / "interface.html") as f:
         html_content = await f.read()
     return HTMLResponse(content=html_content)
