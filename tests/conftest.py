@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from datetime import UTC, datetime
+import pprint
 
 import pytest
 
@@ -41,7 +42,7 @@ def fetch_problematic_tests():
             "git_branch": git_branch,
             "detailed": "false",  # We only need test FQNs, not full details
             "days": os.environ.get("CI_VIZ_PROBLEMATIC_DAYS", "7"),
-            "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3")
+            "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3"),
         }
 
         query_string = urllib.parse.urlencode(params)
@@ -51,7 +52,7 @@ def fetch_problematic_tests():
 
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status == 200:
-                data = json.loads(response.read().decode('utf-8'))
+                data = json.loads(response.read().decode("utf-8"))
                 problematic_fqns = data.get("problematic_test_fqns", [])
                 PROBLEMATIC_TESTS.update(problematic_fqns)
             # Non-200 responses are silently ignored
@@ -90,7 +91,7 @@ def pytest_runtest_setup(item):
         # Add xfail marker to this test
         xfail_marker = pytest.mark.xfail(
             reason="Test marked as problematic by CI Viz (known to be flaky or consistently failing)",
-            strict=False  # Allow the test to pass unexpectedly (which is good news!)
+            strict=False,  # Allow the test to pass unexpectedly (which is good news!)
         )
         item.add_marker(xfail_marker)
 
@@ -104,7 +105,7 @@ def pytest_runtest_logreport(report):
         # Determine the actual test status
         # pytest reports xfailed tests as "skipped" with wasxfail attribute
         # and xpassed tests as "passed" with wasxfail attribute
-        if hasattr(report, 'wasxfail'):
+        if hasattr(report, "wasxfail"):
             if report.outcome == "skipped":
                 test_status = "xfailed"  # Expected to fail and did fail
             elif report.outcome == "passed":
@@ -118,8 +119,12 @@ def pytest_runtest_logreport(report):
             "test_id": report.nodeid,
             "test_name": report.nodeid.split("::")[-1],
             "test_fqn": report.nodeid,
-            "test_module": report.nodeid.split("::")[0].replace("/", ".").replace(".py", ""),
-            "test_suite": report.nodeid.split("::")[1] if "::" in report.nodeid else None,
+            "test_module": report.nodeid.split("::")[0]
+            .replace("/", ".")
+            .replace(".py", ""),
+            "test_suite": (
+                report.nodeid.split("::")[1] if "::" in report.nodeid else None
+            ),
             "test_status": test_status,
             "test_message": str(report.longrepr) if report.failed else None,
             "test_traceback": str(report.longrepr) if report.failed else None,
@@ -142,6 +147,7 @@ def pytest_sessionfinish(session):  # noqa: ARG001
     start = datetime.fromisoformat(TEST_DATA["session_start_time"])
     TEST_DATA["session_total_duration"] = (end - start).total_seconds()
 
+    # pprint.pprint(TEST_DATA)
     send_to_ci_viz(TEST_DATA)
 
 
@@ -149,18 +155,46 @@ def get_git_info():
     """Extract git information."""
     try:
         return {
-            "git_repository_url": subprocess.check_output(["git", "config", "--get", "remote.origin.url"])
+            "git_repository_url": subprocess.check_output(
+                ["git", "config", "--get", "remote.origin.url"]
+            )
             .decode()
             .strip(),
-            "git_branch": subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode().strip(),
-            "git_commit_hash": subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip(),
-            "git_commit_message": subprocess.check_output(["git", "log", "-1", "--pretty=%B"]).decode().strip(),
-            "git_commit_author": subprocess.check_output(["git", "log", "-1", "--pretty=%an"]).decode().strip(),
-            "git_commit_author_email": subprocess.check_output(["git", "log", "-1", "--pretty=%ae"]).decode().strip(),
-            "git_commit_timestamp": subprocess.check_output(["git", "log", "-1", "--pretty=%aI"]).decode().strip(),
+            "git_branch": subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+            )
+            .decode()
+            .strip(),
+            "git_commit_hash": subprocess.check_output(["git", "rev-parse", "HEAD"])
+            .decode()
+            .strip(),
+            "git_commit_message": subprocess.check_output(
+                ["git", "log", "-1", "--pretty=%B"]
+            )
+            .decode()
+            .strip(),
+            "git_commit_author": subprocess.check_output(
+                ["git", "log", "-1", "--pretty=%an"]
+            )
+            .decode()
+            .strip(),
+            "git_commit_author_email": subprocess.check_output(
+                ["git", "log", "-1", "--pretty=%ae"]
+            )
+            .decode()
+            .strip(),
+            "git_commit_timestamp": subprocess.check_output(
+                ["git", "log", "-1", "--pretty=%aI"]
+            )
+            .decode()
+            .strip(),
         }
     except (subprocess.CalledProcessError, FileNotFoundError, UnicodeDecodeError):
-        return {"git_repository_url": "unknown", "git_branch": "unknown", "git_commit_hash": "unknown"}
+        return {
+            "git_repository_url": "unknown",
+            "git_branch": "unknown",
+            "git_commit_hash": "unknown",
+        }
 
 
 def get_environment_info():
@@ -190,7 +224,8 @@ def get_ci_info():
             "ci_job_id": os.environ.get("GITHUB_RUN_ID"),
             "ci_pipeline_id": os.environ.get("GITHUB_RUN_NUMBER"),
             "ci_trigger": os.environ.get("GITHUB_EVENT_NAME"),
-            "ci_pull_request_number": int(os.environ.get("GITHUB_PR_NUMBER", 0)) or None,
+            "ci_pull_request_number": int(os.environ.get("GITHUB_PR_NUMBER", 0))
+            or None,
         }
 
     # Jenkins
@@ -252,7 +287,9 @@ def send_to_ci_viz(data):
                 "test_total_duration": test_result["test_total_duration"],
                 "test_call_duration": test_result["test_call_duration"],
                 "test_start_time": test_result["test_start_time"],
-                "was_marked_problematic": test_result.get("was_marked_problematic", False),
+                "was_marked_problematic": test_result.get(
+                    "was_marked_problematic", False
+                ),
                 # Session information
                 "session_id": data["session_id"],
                 "session_start_time": data["session_start_time"],
@@ -264,13 +301,17 @@ def send_to_ci_viz(data):
                 "git_commit_hash": data["git_info"].get("git_commit_hash"),
                 "git_commit_message": data["git_info"].get("git_commit_message"),
                 "git_commit_author": data["git_info"].get("git_commit_author"),
-                "git_commit_author_email": data["git_info"].get("git_commit_author_email"),
+                "git_commit_author_email": data["git_info"].get(
+                    "git_commit_author_email"
+                ),
                 "git_commit_timestamp": data["git_info"].get("git_commit_timestamp"),
                 # Environment information
                 "env_python_version": data["environment"].get("env_python_version"),
                 "env_platform": data["environment"].get("env_platform"),
                 "env_architecture": data["environment"].get("env_architecture"),
-                "env_dependencies": json.dumps(data["environment"].get("env_dependencies", [])),
+                "env_dependencies": json.dumps(
+                    data["environment"].get("env_dependencies", [])
+                ),
                 "env_vars": json.dumps(data["environment"].get("env_vars", {})),
                 # CI information
                 "ci_system": data["ci_info"].get("ci_system"),
@@ -288,14 +329,43 @@ def send_to_ci_viz(data):
         url = f"{ci_viz_url}/api/v1/ingest-test-results/"
         json_data = json.dumps(test_results).encode("utf-8")
 
-        req = urllib.request.Request(url, data=json_data, headers={"Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(
+            url,
+            data=json_data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
 
-        with urllib.request.urlopen(req, timeout=30):
-            pass  # Successfully sent, no further action needed
+        urllib.request.urlopen(req, timeout=30).close()
 
-    except urllib.error.URLError:
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
         # Don't fail the test run if CI Viz is unavailable
         pass
-    except (urllib.error.HTTPError, json.JSONDecodeError, ValueError):
-        # Don't fail the test run if CI Viz is unavailable
-        pass
+
+
+# def send_to_ci_viz(data):
+#     """Send test session data to CI Viz."""
+#     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
+
+#     try:
+#         # Prepare request
+#         url = f"{ci_viz_url}/api/v1/ingest-test-results/"
+#         json_data = json.dumps(data).encode("utf-8")
+
+#         req = urllib.request.Request(
+#             url,
+#             data=json_data,
+#             headers={"Content-Type": "application/json"},
+#             method="POST",
+#         )
+
+#         urllib.request.urlopen(req, timeout=30).close()
+
+#     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
+#         # Don't fail the test run if CI Viz is unavailable
+#         pass

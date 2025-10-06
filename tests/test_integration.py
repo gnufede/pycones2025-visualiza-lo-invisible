@@ -70,9 +70,9 @@ def start_server():
         cwd=Path(__file__).parent.parent,
     )
 
-    # Wait for server to be ready (max 0.1 seconds)
-    for _i in range(10):
-        time.sleep(0.01)
+    # Wait for server to be ready (max 1 seconds)
+    for _i in range(50):
+        time.sleep(0.02)
         if is_server_running():
             return process
 
@@ -103,7 +103,7 @@ def run_tests():
             "pytest",
             "tests/test_demo.py",
             "tests/test_problematic_integration.py",
-            "-v",
+            "-vv",
             "--tb=short",
         ],
         cwd=Path(__file__).parent.parent,
@@ -289,7 +289,7 @@ def main():
                 f"{test_result['failed']} failed, "
                 f"{test_result['xfailed']} xfailed, "
                 f"{test_result['xpassed']} xpassed",
-                flush=True
+                flush=True,
             )
 
         print("\n  ✓ All test runs completed\n", flush=True)
