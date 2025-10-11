@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>reveal.js</title>
+
+		<link rel="stylesheet" href="dist/reset.css">
+		<link rel="stylesheet" href="dist/reveal.css">
+		<link rel="stylesheet" href="dist/theme/black.css">
+		<style>
+		.reveal pre code {
+			font-size: 0.75em;
+		}
+		</style>
+
+		<!-- Theme used for syntax highlighted code -->
+		<link rel="stylesheet" href="plugin/highlight/monokai.css">
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+				<section data-markdown>
+					<textarea data-template>
+						## Visualiza lo invisible
+						PyConES 2025 (Sevilla)
+						---
+						## I'm Federico Mon
+						This is my first PyConES
+						---
+						## What are we talking about today?
+						- Flaky tests and blocked engineers
+						- Pytest plugins
+						- Collecting and using information
+						---
+						## Disclaimer
+						_"He venido a hablar de mi libro"_
+						---
+						## Schrödinger's unit test
+						---
+						## Say we open a PR
+						---
+						## 1 test failure
+						---
+						## 1 *TOTALLY UNRELATED* test failure
+						---
+						## What now? Can we merge? How?
+						---
+						## pytest -vv
+						```txt
+						collecting ... collected 9 items
+						tests/test_demo.py::test_always_pass PASSED                              [ 11%]
+						[...]
+						tests/test_problematic_integration.py::test_flaky_example FAILED         [ 77%]
+						tests/test_problematic_integration.py::test_stable_example PASSED        [ 88%]
+						tests/test_problematic_integration.py::test_another_flaky_example PASSED [100%]
+						=================================== FAILURES ===================================
+						______________________________ test_flaky_example ______________________________
+						tests/test_problematic_integration.py:19: in test_flaky_example
+							raise AssertionError(msg)
+						E   AssertionError: Simulated flaky test failure
+						=========================== short test summary info ============================
+						FAILED tests/test_problematic_integration.py::test_flaky_example - AssertionError: Simulated flaky test failure
+						========================= 1 failed, 8 passed in 0.13s ==========================
+						```
+						---
+						## pytest session start
+						```python
+						# tests/conftest.py
+						TEST_DATA = None
+						def pytest_sessionstart(session):
+							"""Capture session start info."""
+							global TEST_DATA
+
+							TEST_DATA = {
+								"session_id": str(uuid.uuid4()),
+								"session_start_time": datetime.now(UTC).isoformat(),
+								"git_info": get_git_info(),
+								"environment": get_environment_info(),
+								"ci_info": get_ci_info(),
+								"test_results": [],
+							}
+						```
+						---
+						## pytest runtest logreport
+						```python
+						# tests/conftest.py
+						def pytest_runtest_logreport(report):
+							if report.when == "call":  # Only captures test execution (no setup/teardown)
+								test_result = {
+									"test_fqn": report.nodeid,
+									"test_name": report.nodeid.split("::")[-1],
+									"test_status": report.outcome,
+									"test_traceback": str(report.longrepr) if report.failed else None,
+									"test_call_duration": report.duration,
+									"test_file_path": str(getattr(report, "fspath", "None")),
+									"test_line_number": report.location[1] if report.location else None,
+								}
+								TEST_DATA["test_results"].append(test_result)
+						```
+						---
+						## pytest session finish
+						```python
+						# tests/conftest.py
+
+						def pytest_sessionfinish(session):
+							"""Send data to CI Viz at session end."""
+							end = datetime.now(UTC)
+							TEST_DATA["session_end_time"] = end.isoformat()
+
+							# Calculate total duration
+							start = datetime.fromisoformat(TEST_DATA["session_start_time"])
+							TEST_DATA["session_total_duration"] = (end - start).total_seconds()
+
+							# pprint.pprint(TEST_DATA)
+							send_to_ci_viz(TEST_DATA)
+						```
+						---
+						## pytest hook pprint
+						```json
+						{'env_info': {'env_architecture': 'arm64', 'env_python_version': '3.11.11'}},
+						'git_info': {'git_branch': 'main', 'git_commit_author': 'Federico Mon',
+						'git_commit_hash': '6b14074c6f69a245c10b9e0809415194bb0e7a20'},
+						'session_start_time': '2025-10-04T17:43:10.772731+00:00',
+						'session_total_duration': 0.153143, 'test_results': [
+						{'test_call_duration': 5.212500400375575e-05, 'test_file_path': 'tests/test_demo.py',
+						'test_fqn': 'tests/test_demo.py::test_always_pass', 'test_line_number': 8,
+						'test_module': 'tests.test_demo', 'test_name': 'test_always_pass',
+						'test_end_time': '2025-10-04T17:43:10.818653+00:00', 'test_status': 'passed',
+						'test_total_duration': 5.212500400375575e-05, 'test_traceback': None},
+						[...]
+						```
+						---
+						## Sending our data
+						```python
+						# tests/conftest.py
+						def send_to_ci_viz(data):
+							ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
+							try:
+								req = urllib.request.Request(
+									f"{ci_viz_url}/api/v1/ingest-test-results/",
+									data=json.dumps(data).encode("utf-8"),
+									headers={"Content-Type": "application/json"}, # TODO: Authentication
+									method="POST",
+								)
+								urllib.request.urlopen(req, timeout=30).close()
+							except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+								pass  # Don't fail the test run if backend service is unavailable
+						```
+						---
+						## Defining our data
+						```python
+						from pydantic import BaseModel
+
+						class TestResult(BaseModel):
+							test_id: str
+							test_name: str
+							test_fqn: str
+							test_module: str
+							test_suite: str | None = None
+							test_file_path: str | None = None
+							test_line_number: int | None = None
+						    [...]
+						```
+						---
+						## Ingesting the data
+						```python
+						@app.post("/api/v1/ingest-test-results/")
+						async def ingest_test_results(test_results: list[TestResult]):
+							try:
+								conn = sqlite3.connect(DB_PATH)
+								cursor = conn.cursor()
+								for test_result in test_results:
+									cursor.execute(
+										"""
+										INSERT INTO test_results (
+											test_id, test_name, test_fqn, test_status, ...
+											) VALUES (?, ?, ?, ?, ?, ... )
+										""", (test_result.test_id, test_result.test_name, ...)
+								conn.commit()
+								conn.close()
+						---
+						## Our database
+						| Test FQN | Git hash | Status | Datetime |
+						|----------|------------|--------|----------|
+						| test_login | def456 | Passed  | 1970-1-1 |
+						| test_my_nightmare | def456 | Failed | 1970-1-1 |
+						| test_login | def456 | Failed  | 1970-1-1 |
+						| test_my_nightmare | def456 | Failed | 1970-1-1 |
+						| test_login | abc123 | Passed | 1970-1-1 |
+						| test_my_nightmare | abc123 | Failed | 1970-1-1 |
+						---
+						## Finding the patterns
+						| Test FQN | Git hash | Passed times | Failed times |
+						|----------|------------|--------------|--------------|
+						| test_login | abc123 | 10 | 0 |
+						| test_login | def456 | 6  | 4 |
+						| test_my_nightmare | abc123 | 0 | 10 |
+						| test_my_nightmare | def456 | 0 | 10 |
+						---
+						## SQL (save and read)
+						```python
+
+						@app.post("/api/v1/ingest-test-results/")
+						async def ingest_test_results(test_results: list[TestResult]):
+							"""Ingest test results directly."""
+							try:
+								conn = sqlite3.connect(DB_PATH)
+								cursor = conn.cursor()
+
+								# Insert each test result as a separate row (denormalized)
+								for test_result in test_results:
+									cursor.execute(
+										"""
+										INSERT INTO test_results (
+											test_id, test_name, test_fqn, test_module, test_suite, test_file_path, test_line_number,
+											test_status, test_message, test_traceback, test_total_duration, test_call_duration, test_start_time,
+											was_marked_problematic,
+											session_id, session_start_time, session_end_time, session_total_duration,
+											git_repository_url, git_branch, git_commit_hash, git_commit_message,
+											git_commit_author, git_commit_author_email, git_commit_timestamp,
+											env_python_version, env_platform, env_architecture, env_dependencies, env_vars,
+											ci_system, ci_job_url, ci_pipeline_url, ci_job_id, ci_pipeline_id,
+											ci_trigger, ci_pull_request_number
+										) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+									""",
+						```
+						---
+						## Looking at the invisible
+						```python
+						```
+						---
+						## Closing the loop (backend)
+						```python
+						```
+						---
+						## Closing the loop (conftest) I
+						```python
+						# tests/conftest.py
+						UNRELIABLE_TESTS = set()  # Cache for problematic test FQNs
+
+						def pytest_sessionstart(session):  # noqa: ARG001
+							"""Capture session start info and fetch unreliable tests."""
+							global TEST_DATA  # noqa: PLW0603
+
+							fetch_unreliable_tests()
+						    [...]
+						```
+						---
+						## Closing the loop (conftest) II
+						```python
+						def fetch_unreliable_tests():
+							if not (git := get_git_info()) or not git.get("git_branch"): return
+							try:
+								q = urllib.parse.urlencode({
+										"git_repository_url": git["git_repository_url"],
+										"git_branch": git["git_branch"]})
+								with urllib.request.urlopen(
+						            f"{CI_VIZ_URL}/api/v1/unreliable-tests?{q}", timeout=10
+								) as r:
+									if r.status == 200:
+										UNRELIABLE_TESTS.update(
+											json.load(r).get("unreliable_test_fqns", [])
+										)
+							except Exception: pass
+						```
+						---
+						## Closing the loop (conftest) III
+						```python
+						# tests/conftest.py
+						def pytest_runtest_setup(item):
+							"""Mark unreliable tests as expected failures before they run."""
+							if item.nodeid in UNRELIABLE_TESTS:
+								xfail_marker = pytest.mark.xfail(
+									reason="Test detected as unreliable"
+						                   " (known to be flaky or consistently failing)",
+									strict=False,  # Allows the test to pass
+								)
+								item.add_marker(xfail_marker)
+						```
+						---
+						## Next steps
+						```python
+						```
+						---
+						## Practical recommendations
+						```bash
+						$ pip install pytest-randomly pytest-socket
+						```
+						---
+						## Thanks
+						---
+					</textarea>
+				</section>
+			</div>
+		</div>
+
+		<script src="dist/reveal.js"></script>
+		<script src="plugin/notes/notes.js"></script>
+		<script src="plugin/markdown/markdown.js"></script>
+		<script src="plugin/highlight/highlight.js"></script>
+		<script>
+			// More info about initialization & config:
+			// - https://revealjs.com/initialization/
+			// - https://revealjs.com/config/
+			Reveal.initialize({
+				hash: true,
+
+				// Learn about plugins: https://revealjs.com/plugins/
+				plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+			});
+		</script>
+	</body>
+</html>
