@@ -8,7 +8,12 @@
 
 		<link rel="stylesheet" href="dist/reset.css">
 		<link rel="stylesheet" href="dist/reveal.css">
-		<link rel="stylesheet" href="dist/theme/black.css">
+		<!-- <link rel="stylesheet" href="dist/theme/black.css"> -->
+
+		<link rel="stylesheet" href="dist/theme/white.css">
+
+		<!-- Theme used for syntax highlighted code -->
+		<link rel="stylesheet" href="plugin/highlight/default.css">
 		<style>
 		.reveal pre code {
 			font-size: 0.75em;
@@ -16,7 +21,7 @@
 		</style>
 
 		<!-- Theme used for syntax highlighted code -->
-		<link rel="stylesheet" href="plugin/highlight/monokai.css">
+		<!-- <link rel="stylesheet" href="plugin/highlight/monokai.css"> -->
 	</head>
 	<body>
 		<div class="reveal">
@@ -30,14 +35,19 @@
 						This is my first PyConES
 						---
 						## What are we talking about today?
-						- Flaky tests and blocked engineers
-						- Pytest plugins
-						- Collecting and using information
+						- Flaky tests and blocked engineers  <!-- .element: class="fragment" data-fragment-index="1" -->
+						- Pytest plugins  <!-- .element: class="fragment" data-fragment-index="2" -->
+						- Collecting and using information  <!-- .element: class="fragment" data-fragment-index="3" -->
 						---
 						## Disclaimer
 						_"He venido a hablar de mi libro"_
+						- I work for Datadog on this topic  <!-- .element: class="fragment" data-fragment-index="1" -->
+						- None of this presentation is how Datadog products work  <!-- .element: class="fragment" data-fragment-index="2" -->
+						- This is just a toy implementation  <!-- .element: class="fragment" data-fragment-index="3" -->
 						---
-						## Schrödinger's unit test
+						## Why do we write (and run) tests?
+						- Verify that code works as intended  <!-- .element: class="fragment" data-fragment-index="1" -->
+						- Tests provide confidence that new code doesn't introduce errors  <!-- .element: class="fragment" data-fragment-index="2" -->
 						---
 						## Say we open a PR
 						---
@@ -45,25 +55,56 @@
 						---
 						## 1 *TOTALLY UNRELATED* test failure
 						---
-						## What now? Can we merge? How?
-						---
 						## pytest -vv
 						```txt
 						collecting ... collected 9 items
-						tests/test_demo.py::test_always_pass PASSED                              [ 11%]
+						tests/test_demo.py::test_always_pass PASSED                  [ 11%]
 						[...]
-						tests/test_problematic_integration.py::test_flaky_example FAILED         [ 77%]
-						tests/test_problematic_integration.py::test_stable_example PASSED        [ 88%]
-						tests/test_problematic_integration.py::test_another_flaky_example PASSED [100%]
-						=================================== FAILURES ===================================
-						______________________________ test_flaky_example ______________________________
-						tests/test_problematic_integration.py:19: in test_flaky_example
+						tests/test_integration.py::test_flaky_example FAILED         [ 77%]
+						tests/test_integration.py::test_stable_example PASSED        [ 88%]
+						tests/test_integration.py::test_another_flaky_example PASSED [100%]
+						=========================== FAILURES ==============================
+						______________________ test_flaky_example _________________________
+						tests/test_integration.py:19: in test_flaky_example
 							raise AssertionError(msg)
-						E   AssertionError: Simulated flaky test failure
-						=========================== short test summary info ============================
-						FAILED tests/test_problematic_integration.py::test_flaky_example - AssertionError: Simulated flaky test failure
-						========================= 1 failed, 8 passed in 0.13s ==========================
+						E   AssertionError: Flaky test failure
+						===================== short test summary info =====================
+						FAILED tests/test_integration.py::test_flaky_example - AssertionError: Flaky test failure
+						================== 1 failed, 8 passed in 0.13s ====================
 						```
+						---
+						## What now? Can we merge? How?
+						---
+						## Retry the CI job
+						---
+						## Now all the tests pass
+						```txt
+						========================== 9 passed in 0.12s ============================
+						```
+						---
+						![schrodinger's cat](img/schrodinger_fry.jpg)
+						---
+						## Can we merge now?
+						---
+						## How can we stop this madness?
+						---
+						## The answer: Pytest Plugins and 🧠
+						---
+						## Fede's Curated Plugins
+						```bash
+						$ pip install pytest-randomly pytest-socket
+						$ pip install pytest-testmon
+						```
+						---
+						## pytest plugins
+						- tests/conftest.py
+						- pyproject.toml
+						---
+						## pytest lifecycle
+						![pytest diagram 1](img/diagram_1.png)
+						---
+						## pytest lifecycle II
+						![pytest diagram 2](img/diagram_2.png)
 						---
 						## pytest session start
 						```python
@@ -93,7 +134,7 @@
 									"test_name": report.nodeid.split("::")[-1],
 									"test_status": report.outcome,
 									"test_traceback": str(report.longrepr) if report.failed else None,
-									"test_call_duration": report.duration,
+									"test_duration": report.duration,
 									"test_file_path": str(getattr(report, "fspath", "None")),
 									"test_line_number": report.location[1] if report.location else None,
 								}
@@ -199,69 +240,64 @@
 						| test_my_nightmare | abc123 | 0 | 10 |
 						| test_my_nightmare | def456 | 0 | 10 |
 						---
-						## SQL (save and read)
-						```python
-
-						@app.post("/api/v1/ingest-test-results/")
-						async def ingest_test_results(test_results: list[TestResult]):
-							"""Ingest test results directly."""
-							try:
-								conn = sqlite3.connect(DB_PATH)
-								cursor = conn.cursor()
-
-								# Insert each test result as a separate row (denormalized)
-								for test_result in test_results:
-									cursor.execute(
-										"""
-										INSERT INTO test_results (
-											test_id, test_name, test_fqn, test_module, test_suite, test_file_path, test_line_number,
-											test_status, test_message, test_traceback, test_total_duration, test_call_duration, test_start_time,
-											was_marked_problematic,
-											session_id, session_start_time, session_end_time, session_total_duration,
-											git_repository_url, git_branch, git_commit_hash, git_commit_message,
-											git_commit_author, git_commit_author_email, git_commit_timestamp,
-											env_python_version, env_platform, env_architecture, env_dependencies, env_vars,
-											ci_system, ci_job_url, ci_pipeline_url, ci_job_id, ci_pipeline_id,
-											ci_trigger, ci_pull_request_number
-										) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-									""",
-						```
+						## Flaky tests query
+						---
+						## Widespread issues query
+						---
+						## Test ordering leakages query
+						---
+						## Test timing regressions query
 						---
 						## Looking at the invisible
-						```python
-						```
+						![tests list](img/test_list.png)
+						---
+						## Looking at the invisible II
+						![test detail](img/test_detail.png)
+						---
+						## Looking at the invisible III
+						![dashboards](img/dashboards.png)
 						---
 						## Closing the loop (backend)
 						```python
+						@app.get("/api/v1/flaky-tests")
+						def flaky_tests(repo: str):
+							q = """SELECT test_fqn FROM test_results
+						    WHERE git_repository_url = ? AND git_branch = main
+							GROUP BY test_fqn, git_commit_hash
+							HAVING SUM(status='failed') > 0 AND SUM(status='passed') > 0
+							"""
+							cursor.execute(q, (repo,))
+							flaky_tests = [r[0] for r in cursor.fetchall()]
+							return {"flaky_test_fqns": flaky_tests}
 						```
 						---
-						## Closing the loop (conftest) I
+						## Closing the loop (conftest)
 						```python
 						# tests/conftest.py
-						UNRELIABLE_TESTS = set()  # Cache for problematic test FQNs
+						FLAKY_TESTS = set()  # Cache for problematic test FQNs
 
-						def pytest_sessionstart(session):  # noqa: ARG001
-							"""Capture session start info and fetch unreliable tests."""
-							global TEST_DATA  # noqa: PLW0603
+						def pytest_sessionstart(session):
+							"""Capture session start info and fetch flaky tests."""
+							global TEST_DATA
 
-							fetch_unreliable_tests()
+							fetch_flaky_tests()
 						    [...]
 						```
 						---
 						## Closing the loop (conftest) II
 						```python
-						def fetch_unreliable_tests():
-							if not (git := get_git_info()) or not git.get("git_branch"): return
+						def fetch_flaky_tests():
+							if not (git := get_git_info()) or not git.get("git_repo"): return
 							try:
 								q = urllib.parse.urlencode({
-										"git_repository_url": git["git_repository_url"],
-										"git_branch": git["git_branch"]})
+									"git_repo": git["git_repository_url"]
+								})
 								with urllib.request.urlopen(
-						            f"{CI_VIZ_URL}/api/v1/unreliable-tests?{q}", timeout=10
+						            f"{CI_VIZ_URL}/api/v1/flaky-tests?{q}", timeout=10
 								) as r:
 									if r.status == 200:
-										UNRELIABLE_TESTS.update(
-											json.load(r).get("unreliable_test_fqns", [])
+										FLAKY_TESTS.update(
+											json.load(r).get("flaky_test_fqns", [])
 										)
 							except Exception: pass
 						```
@@ -269,24 +305,26 @@
 						## Closing the loop (conftest) III
 						```python
 						# tests/conftest.py
+
 						def pytest_runtest_setup(item):
-							"""Mark unreliable tests as expected failures before they run."""
-							if item.nodeid in UNRELIABLE_TESTS:
+							"""Mark flaky tests as expected failures before they run."""
+							if item.nodeid in FLAKY_TESTS:
 								xfail_marker = pytest.mark.xfail(
-									reason="Test detected as unreliable"
-						                   " (known to be flaky or consistently failing)",
+									reason="Test detected as flaky",
 									strict=False,  # Allows the test to pass
 								)
 								item.add_marker(xfail_marker)
 						```
 						---
 						## Next steps
-						```python
-						```
+						- Investigate timing regressions (tests taking longer) using report.duration
+						- Investigate test ordering issues
+						- (Optional) Non-automatic quarantining
 						---
 						## Practical recommendations
 						```bash
 						$ pip install pytest-randomly pytest-socket
+						$ pip install pytest-testmon
 						```
 						---
 						## Thanks
