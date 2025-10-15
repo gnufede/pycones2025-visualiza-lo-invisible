@@ -46,9 +46,11 @@
 						---
 						## Why do we write (and run) tests?
 						- Verify that code works as intended  <!-- .element: class="fragment" data-fragment-index="1" -->
-						- Tests provide confidence that new code doesn't introduce errors  <!-- .element: class="fragment" data-fragment-index="2" -->
+						- Tests provide confidence that new code doesn't introduce errors (CI)  <!-- .element: class="fragment" data-fragment-index="2" -->
 						---
 						## Say we open a PR
+						- What's a PR? <!-- .element: class="fragment" data-fragment-index="1" -->
+						- The CI runs all the tests of course <!-- .element: class="fragment" data-fragment-index="2" -->
 						---
 						## 1 test failure
 						---
@@ -153,8 +155,17 @@
 						---
 						## How can we stop this madness?
 						---
-						## The answer: 🧠
-						(and Pytest Plugins)
+						## The plan
+						![crazy-conspiracy-meme](img/conspiracy.jpg)
+						---
+						## Test Observability
+						1. Collect all the details about the tests execution  <!-- .element: class="fragment" data-fragment-index="1" -->
+						2. Backend API and DB to store all of the above  <!-- .element: class="fragment" data-fragment-index="2" -->
+						3. Send the data to the API  <!-- .element: class="fragment" data-fragment-index="3" -->
+						3. Profit  <!-- .element: class="fragment" data-fragment-index="4" -->
+						---
+						## How to collect data about tests execution
+						Pytest plugins!  <!-- .element: class="fragment" data-fragment-index="1" -->
 						---
 						## Fede's Curated Plugins
 						```bash
@@ -165,7 +176,7 @@
 						- tests/conftest.py
 						- pyproject.toml (as a library)
 
-						[Read more](https://docs.pytest.org/en/latest/how-to/writing_plugins.html#writing-your-own-plugin)
+						[Writing your own plugin](https://docs.pytest.org/en/latest/how-to/writing_plugins.html#writing-your-own-plugin)
 						---
 						## pytest lifecycle
 						![pytest diagram 1](img/diagram_1.png)
@@ -262,13 +273,14 @@
 						from pydantic import BaseModel
 
 						class TestResult(BaseModel):
-							test_id: str
-							test_name: str
-							test_fqn: str
-							test_module: str
-							test_suite: str | None = None
-							test_file_path: str | None = None
-							test_line_number: int | None = None
+							test_fqn: str  # 'tests/test_integration.py::test_flaky_example'
+						    test_status: str  # 'failed'
+							test_traceback: str | None = None  # 'AssertionError: Flaky test failure'
+						    test_duration: int
+						    git_commit_hash: str
+						    git_branch: str
+						    git_repo: str
+						    env_python_version: str
 						    [...]
 						```
 						---
@@ -283,39 +295,29 @@
 									cursor.execute(
 										"""
 										INSERT INTO test_results (
-											test_id, test_name, test_fqn, test_status, ...
+											test_fqn, test_status, test_traceback ...
 											) VALUES (?, ?, ?, ?, ?, ... )
-										""", (test_result.test_id, test_result.test_name, ...)
+										""", (test_result.test_fqn, test_result.test_status, ...)
 								conn.commit()
 								conn.close()
 						---
 						## Our database
-						| Test FQN | Git hash | Status | Datetime |
-						|----------|------------|--------|----------|
-						| test_login | def456 | Passed  | 1970-1-1 |
-						| test_my_nightmare | def456 | Failed | 1970-1-1 |
-						| test_login | def456 | Failed  | 1970-1-1 |
-						| test_my_nightmare | def456 | Failed | 1970-1-1 |
-						| test_login | abc123 | Passed | 1970-1-1 |
-						| test_my_nightmare | abc123 | Failed | 1970-1-1 |
+						| Test FQN | Commit | Branch| Status | Datetime |
+						|----------|--------|-------|--------|----------|
+						| test_login | def456 | staging | Passed  | 00:00 |
+						| test_my_nightmare | def456  | staging | Failed | 00:00|
+						| test_login | def456 | staging | Failed  | 00:00|
+						| test_my_nightmare | def456  | main| Failed | 00:00|
+						| test_login | abc123  | staging| Passed | 00:00|
+						| test_my_nightmare | abc123  | main| Failed | 00:00 |
 						---
 						## Finding the patterns
-						| Test FQN | Git hash | Passed times | Failed times |
-						|----------|------------|--------------|--------------|
-						| test_login | abc123 | 10 | 0 |
-						| test_login | def456 | 6  | 4 |
-						| test_my_nightmare | abc123 | 0 | 10 |
-						| test_my_nightmare | def456 | 0 | 10 |
-						---
-						## Flaky tests query
-						- Warning: Tests should fail with the same error
-						---
-						## Widespread issues query
-						- Warning: A couple PRs forcing some error -> quarantines the test
-						---
-						## Test ordering leakages query
-						---
-						## Test timing regressions query
+						| Test FQN | Commit | Branch| #Passed | #Failed |
+						|----------|--------|-------|---------|---------|
+						| test_login | abc123 | main | 10 | 0 |
+						| test_login | def456 |  staging |6  | 4 |
+						| test_my_nightmare | abc123 | main | 0 | 10 |
+						| test_my_nightmare | def456 |  staging |0 | 10 |
 						---
 						## Looking at the invisible
 						![tests list](img/test_list.png)
@@ -326,88 +328,135 @@
 						## Looking at the invisible III
 						![dashboards](img/dashboards.png)
 						---
-						## Closing the loop (backend)
+						## Revisiting the plan
+						1. ~~Collect all the details about the tests execution~~
+						2. ~~Backend API and DB to store all of the above~~
+						3. ~~Send the data to the API~~
+						3. Profit?
+						---
+						## Not enough
+						![disappointed fan](img/disappointed-fan.gif)
+						---
+						## Choose your path
+						![drake stare at dashboards or automate solutions](img/choose-your-path.jpg)
+						---
+						## New plan
+						1. Expose API for known flaky tests
+						2. Query backend from CI for known flaky tests
+						3. Don't fail CI job if they fail
+						---
+						## Don't fail CI job if they fail
+						![wait what](img/wait-wait-what.gif)
+						---
+						## [Dealing with tests that cannot succeed](https://docs.pytest.org/en/6.2.x/skipping.html)
+						- `@pytest.mark.skip`
+						- `@pytest.mark.xfail`
+						---
+						## Skip
+						- No need to run the test
+						```python
+						@pytest.mark.skipif(
+						    sys.version_info < (3, 7), reason="requires python3.7 or higher"
+						)
+						def test_function():
+							...
+						```
+						---
+						## Xfail
+						- Run the test, just in case
+						```python
+@pytest.mark.xfail(
+	sys.platform == "win32", reason="bug in a 3rd party library"
+)
+def test_function():
+	...
+						```
+						---
+						## Flaky tests query (backend)
+						```python
+						# Find flaky tests: same test, same commit, both pass & fail
+						query = """
+							SELECT test_fqn,
+								GROUP_CONCAT(DISTINCT test_traceback) as expected_exceptions
+							FROM test_results
+							WHERE git_repository_url = ? AND git_branch = ?
+							GROUP BY test_fqn, git_commit_hash
+							HAVING SUM(test_status = 'passed') > 0
+							AND SUM(test_status = 'failed') > 0
+						"""
+						cursor.execute(query, (repo, 'main'))
+						flaky_tests = cursor.fetchall()
+						```
+						---
+						## Flaky tests endpoint (backend)
 						```python
 						@app.get("/api/v1/flaky-tests")
-						def flaky_tests(repo: str):
-							q = """SELECT test_fqn FROM test_results
-						    WHERE git_repository_url = ? AND git_branch = main
-							GROUP BY test_fqn, git_commit_hash
-							HAVING SUM(status='failed') > 0 AND SUM(status='passed') > 0
-							"""
-							cursor.execute(q, (repo,))
-							flaky_tests = [r[0] for r in cursor.fetchall()]
-							return {"flaky_test_fqns": flaky_tests}
+						def flaky_tests(repo: str, branch: str):
+							tests = get_flaky_tests(repo, branch)
+
+							# Return dict: test_fqn -> [expected_exception_messages]
+							return {
+								"flaky_tests": {
+									test["test_fqn"]: test["expected_exceptions"]
+									for test in tests
+								}
+							}
 						```
 						---
-						## Closing the loop (conftest)
+						## Fetch flaky tests (plugin)
 						```python
 						# tests/conftest.py
-						FLAKY_TESTS = set()  # Cache for problematic test FQNs
+						FLAKY_TESTS = {}  # Dict: {test_fqn: [exceptions]}
 
 						def pytest_sessionstart(session):
-							"""Capture session start info and fetch flaky tests."""
-							global TEST_DATA
-
-							fetch_flaky_tests()
-						    [...]
+							"""Fetch problematic tests with their expected exceptions."""
+							with urllib.request.urlopen(
+								f"{CI_VIZ_URL}/api/v1/flaky-tests?q=repo..."
+							) as r:
+								data = json.load(r)
+								FLAKY_TESTS.update(
+									data.get("problematic_tests", {})
+								)
 						```
 						---
-						## Closing the loop (conftest) II
+						## Xfail approach (plugin)
+						- Problem: Hides NEW bugs with different exceptions!  <!-- .element: class="fragment" data-fragment-index="1" -->
 						```python
-						def fetch_flaky_tests():
-							if not (git := get_git_info()) or not git.get("git_repo"): return
-							try:
-								q = urllib.parse.urlencode({
-									"git_repo": git["git_repository_url"]
-								})
-								with urllib.request.urlopen(
-						            f"{CI_VIZ_URL}/api/v1/flaky-tests?{q}", timeout=10
-								) as r:
-									if r.status == 200:
-										FLAKY_TESTS.update(
-											json.load(r).get("flaky_test_fqns", [])
-										)
-							except Exception: pass
-						```
-						---
-						## Closing the loop (conftest) III
-						```python
-						# tests/conftest.py
-
 						def pytest_runtest_setup(item):
 							"""Mark flaky tests as expected failures before they run."""
-							if item.nodeid in FLAKY_TESTS:
+							if item.nodeid in FLAKY_TESTS.keys():
 								xfail_marker = pytest.mark.xfail(
 									reason="Test detected as flaky",
 									strict=False,  # Allows the test to pass
+							        # raises=RuntimeError,  # FIXME
 								)
 								item.add_marker(xfail_marker)
 						```
 						---
-						## Closing the loop (conftest) IV
+						## makereport approach (plugin)
 						```python
-						# tests/conftest.py
 						def pytest_runtest_makereport(item, call):
 							if call.when != "call" or not call.excinfo:
 								return
 
-							if not (flaky := FLAKY_TESTS.get(item.nodeid)):
-								return
+							expected = FLAKY_TESTS.get(item.nodeid, [])
+							actual = str(call.excinfo.getrepr())
 
-							if str(call.excinfo.value) == flaky["traceback"]:
-								call.wasxfail = "Flaky test matched expected failure"
-								call.outcome = "skipped"  # Treat as xfail
+							# Only mark xfail if exception matches
+							if any(exp in actual for exp in expected):
+								call.excinfo = None
+								call.wasxfail = "Known flaky exception"
+							# Different exception? Let it fail! (real bug)
 						```
 						---
 						## Demo
+						---
+						## Thanks
 						---
 						## Next steps
 						- Investigate timing regressions (tests taking longer) using report.duration
 						- Investigate test ordering issues
 						- Non-automatic quarantining
-						---
-						## Thanks
 					</textarea>
 				</section>
 			</div>

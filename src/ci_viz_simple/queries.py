@@ -680,9 +680,43 @@ def get_problematic_tests(
         min_runs: Minimum number of runs required to analyze a test
 
     Returns:
-        List of dictionaries containing problematic test information
+        List of dictionaries containing problematic test information with expected exception messages
     """
     problematic_tests = {}  # Use dict to deduplicate by test_fqn
+
+    # Helper to fetch exception messages for a test
+    def get_exception_messages_for_test(test_fqn: str) -> list[str]:
+        """Fetch unique exception messages for a specific test."""
+        date_threshold = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        
+        where_conditions = [
+            "test_fqn = ?",
+            "test_start_time >= ?",
+            "test_status IN ('failed', 'error', 'xfailed')",
+            "test_traceback IS NOT NULL",
+            "test_traceback != ''",
+        ]
+        params = [test_fqn, date_threshold]
+        
+        if git_repository_url:
+            where_conditions.append("git_repository_url = ?")
+            params.append(git_repository_url)
+        
+        if git_branch:
+            where_conditions.append("git_branch = ?")
+            params.append(git_branch)
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        query = f"""
+            SELECT DISTINCT test_traceback
+            FROM test_results
+            WHERE {where_clause}
+            LIMIT 10
+        """
+        
+        results = _execute_query(query, tuple(params))
+        return [row[0] for row in results if row[0]]
 
     # 1. Get flaky tests - these are definitely problematic
     flaky_tests = get_flaky_tests(
@@ -708,6 +742,7 @@ def get_problematic_tests(
             "session_count": test["session_count"],
             "git_commit_hash": test["git_commit_hash"],
             "source_analysis": "flaky_tests",
+            "expected_exceptions": get_exception_messages_for_test(test_fqn),
         }
 
     # 2. Get tests failing across branches - these indicate systemic issues
@@ -724,6 +759,10 @@ def get_problematic_tests(
         if test_fqn in problematic_tests:
             problematic_tests[test_fqn]["problem_type"] = "flaky_and_failing"
             problematic_tests[test_fqn]["source_analysis"] += ", cross_branch_failures"
+            # Merge exception messages
+            existing_exceptions = set(problematic_tests[test_fqn].get("expected_exceptions", []))
+            new_exceptions = get_exception_messages_for_test(test_fqn)
+            problematic_tests[test_fqn]["expected_exceptions"] = list(existing_exceptions | set(new_exceptions))
         else:
             problematic_tests[test_fqn] = {
                 "test_fqn": test_fqn,
@@ -743,6 +782,7 @@ def get_problematic_tests(
                 "branch_list": test["branch_list"],
                 "sample_error_preview": test["traceback_preview"],
                 "source_analysis": "cross_branch_failures",
+                "expected_exceptions": get_exception_messages_for_test(test_fqn),
             }
 
     # 3. Get tests affected by underlying issues - these are systematically problematic
@@ -767,6 +807,10 @@ def get_problematic_tests(
                 # Upgrade confidence if this test is affected by systemic issues
                 if problematic_tests[test_fqn]["confidence"] != "high":
                     problematic_tests[test_fqn]["confidence"] = "high"
+                # Merge exception messages
+                existing_exceptions = set(problematic_tests[test_fqn].get("expected_exceptions", []))
+                new_exceptions = get_exception_messages_for_test(test_fqn)
+                problematic_tests[test_fqn]["expected_exceptions"] = list(existing_exceptions | set(new_exceptions))
             else:
                 problematic_tests[test_fqn] = {
                     "test_fqn": test_fqn,
@@ -782,6 +826,7 @@ def get_problematic_tests(
                     "affected_branches": issue["affected_branches"],
                     "sample_error_preview": issue["traceback_preview"],
                     "source_analysis": "underlying_issues",
+                    "expected_exceptions": get_exception_messages_for_test(test_fqn),
                 }
 
     # Convert dict back to list and sort by priority

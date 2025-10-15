@@ -268,7 +268,7 @@ def main():
         )
 
         # Step 2: Run tests multiple times
-        num_iterations = 10
+        num_iterations = 12
         print(f"Step 2: Running tests {num_iterations} times...", flush=True)
 
         for i in range(1, num_iterations + 1):

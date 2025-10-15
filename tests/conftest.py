@@ -14,11 +14,11 @@ import pprint
 import pytest
 
 TEST_DATA = {}
-PROBLEMATIC_TESTS = set()  # Cache for problematic test FQNs
+PROBLEMATIC_TESTS = {}  # Cache for problematic tests: {test_fqn: [exception_messages]}
 
 
 def fetch_problematic_tests():
-    """Fetch list of problematic tests from CI Viz service."""
+    """Fetch list of problematic tests with their expected exceptions from CI Viz service."""
     global PROBLEMATIC_TESTS  # noqa: PLW0602
 
     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
@@ -40,7 +40,7 @@ def fetch_problematic_tests():
         params = {
             "git_repository_url": git_repository_url,
             "git_branch": git_branch,
-            "detailed": "false",  # We only need test FQNs, not full details
+            "detailed": "false",  # We need test FQNs with expected exceptions
             "days": os.environ.get("CI_VIZ_PROBLEMATIC_DAYS", "7"),
             "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3"),
         }
@@ -53,8 +53,9 @@ def fetch_problematic_tests():
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode("utf-8"))
-                problematic_fqns = data.get("problematic_test_fqns", [])
-                PROBLEMATIC_TESTS.update(problematic_fqns)
+                # Now we get a dict mapping test_fqn to list of expected exceptions
+                problematic_tests_dict = data.get("problematic_tests", {})
+                PROBLEMATIC_TESTS.update(problematic_tests_dict)
             # Non-200 responses are silently ignored
 
     except urllib.error.URLError:
@@ -82,18 +83,47 @@ def pytest_sessionstart(session):  # noqa: ARG001
     }
 
 
-def pytest_runtest_setup(item):
-    """Mark problematic tests as expected failures before they run."""
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """
+    Mark test as xfail if it fails with an expected exception.
+    
+    This hook is called after the test runs, so we can inspect the actual exception.
+    Only mark as xfail if the exception matches one of the expected exceptions for this test.
+    """
+    # Let pytest generate the report first
+    outcome = yield
+    report = outcome.get_result()
+    
+    # Only process test call phase (not setup or teardown)
+    if report.when != "call":
+        return
+    
+    # Only process if test failed
+    if not report.failed:
+        return
+    
     test_fqn = item.nodeid
-
+    
     # Check if this test is in our problematic tests list
-    if test_fqn in PROBLEMATIC_TESTS:
-        # Add xfail marker to this test
-        xfail_marker = pytest.mark.xfail(
-            reason="Test marked as problematic by CI Viz (known to be flaky or consistently failing)",
-            strict=False,  # Allow the test to pass unexpectedly (which is good news!)
-        )
-        item.add_marker(xfail_marker)
+    expected_exceptions = PROBLEMATIC_TESTS.get(test_fqn, [])
+    if not expected_exceptions:
+        return  # Not a problematic test, let it fail normally
+    
+    # Get the actual exception traceback as a string
+    actual_exception = str(report.longrepr) if report.longrepr else ""
+    
+    # Check if the actual exception matches any of the expected exceptions
+    for expected_exception in expected_exceptions:
+        if expected_exception in actual_exception or actual_exception in expected_exception:
+            # This is an expected failure! Mark it as xfail
+            report.outcome = "skipped"
+            report.wasxfail = f"Test failed with expected exception (known flaky/problematic test tracked by CI Viz)"
+            return
+    
+    # If we get here, the test failed with a DIFFERENT exception than expected
+    # This is a REAL failure that should fail the build!
+    # Do nothing and let pytest report it as a normal failure
 
 
 def pytest_runtest_logreport(report):

@@ -417,7 +417,7 @@ async def get_problematic_tests_endpoint(
         3, description="Minimum number of runs required to analyze a test"
     ),
     detailed: bool = Query(
-        True, description="Return detailed information (True) or just test FQNs (False)"
+        True, description="Return detailed information (True) or just test FQNs with expected exceptions (False)"
     ),
 ):
     """
@@ -425,18 +425,22 @@ async def get_problematic_tests_endpoint(
 
     This endpoint combines results from existing analysis queries (flaky tests, cross-branch
     failures, and underlying issues) to identify problematic tests. It's designed to be called
-    by pytest plugins at session start to get a list of tests that should be marked as
-    expected failures (xfail) so they don't fail the CI build.
+    by pytest plugins at session start to get a dict mapping test FQNs to their expected 
+    exception messages.
+
+    The pytest plugin should only mark a test as xfail if it fails with one of the expected
+    exceptions. This prevents hiding new bugs that manifest as different exceptions.
 
     Args:
         git_repository_url: Filter by specific repository (optional)
         git_branch: Filter by specific branch (optional)
         days: Number of days to look back for analysis
         min_runs: Minimum number of runs required to analyze a test
-        detailed: Return detailed information (True) or just test FQNs (False)
+        detailed: Return detailed information (True) or dict mapping test_fqn to expected exceptions (False)
 
     Returns:
-        List of problematic tests with their details or just their FQNs
+        If detailed=False: Dict mapping test FQN to list of expected exception messages
+        If detailed=True: List of problematic tests with their full details
     """
     try:
         results = get_problematic_tests(
@@ -447,9 +451,14 @@ async def get_problematic_tests_endpoint(
         )
 
         if not detailed:
-            # Return just the test FQNs for easy consumption by pytest plugin
+            # Return dict mapping test_fqn to list of expected exception messages
+            # This allows conftest to only mark test as xfail if it fails with expected exception
+            problematic_tests_dict = {
+                test["test_fqn"]: test.get("expected_exceptions", [])
+                for test in results
+            }
             return {
-                "problematic_test_fqns": [test["test_fqn"] for test in results],
+                "problematic_tests": problematic_tests_dict,
                 "count": len(results),
                 "filters": {
                     "git_repository_url": git_repository_url,
