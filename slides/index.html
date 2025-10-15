@@ -32,7 +32,6 @@
 						PyConES 2025 (Sevilla)
 						---
 						## I'm Federico Mon
-						This is my first PyConES
 						---
 						## What are we talking about today?
 						- Flaky tests and blocked engineers  <!-- .element: class="fragment" data-fragment-index="1" -->
@@ -86,19 +85,87 @@
 						---
 						## Can we merge now?
 						---
+						## Why the flakiness?
+						Code is not run in a vacuum
+						---
+						## Random
+						```python
+						import random
+
+						def test_random():
+							assert random.randint(1, 10) > 1
+						```
+						---
+						## Time/Timezone issues
+						```python
+						from datetime import datetime, timedelta
+
+						def test_days_have_24_hours():
+							now = datetime.now()
+							tomorrow = now + timedelta(hours=24)
+							assert now.hour == tomorrow.hour
+
+						# Try running this next Saturday (Oct 25 2025)
+						```
+						---
+						## External resources accessed
+						```python
+						import requests
+
+						def test_real_http_request_succeeds():
+							response = requests.get("https://httpbin.org/status/200")
+							assert response.status_code == 200
+
+						# What if httbin.org is down/inaccessible
+						```
+						---
+						## Leaky state
+						```python
+						global_list = []
+
+						def test_empty_list():
+							assert len(global_list) == 0
+
+						def test_add_item():
+							global_list.append(1)
+							assert len(global_list) == 1
+
+						# What if we refactor/reorder them?
+						```
+						---
+						## Race conditions
+						```python
+						ready = False
+
+						async def prepare():
+							global ready
+							await asyncio.sleep(0.05)
+							ready = True
+
+						@pytest.mark.asyncio
+						async def test_async_ready_check():
+							global ready
+							ready = False
+							asyncio.create_task(prepare())
+							await asyncio.sleep(0.0500242)
+							assert ready  # Flaky: might fail
+						```
+						---
 						## How can we stop this madness?
 						---
-						## The answer: Pytest Plugins and 🧠
+						## The answer: 🧠
+						(and Pytest Plugins)
 						---
 						## Fede's Curated Plugins
 						```bash
-						$ pip install pytest-randomly pytest-socket
-						$ pip install pytest-testmon
+						$ pip install pytest-randomly pytest-socket pytest-freezegun
 						```
 						---
 						## pytest plugins
 						- tests/conftest.py
-						- pyproject.toml
+						- pyproject.toml (as a library)
+
+						[Read more](https://docs.pytest.org/en/latest/how-to/writing_plugins.html#writing-your-own-plugin)
 						---
 						## pytest lifecycle
 						![pytest diagram 1](img/diagram_1.png)
@@ -241,8 +308,10 @@
 						| test_my_nightmare | def456 | 0 | 10 |
 						---
 						## Flaky tests query
+						- Warning: Tests should fail with the same error
 						---
 						## Widespread issues query
+						- Warning: A couple PRs forcing some error -> quarantines the test
 						---
 						## Test ordering leakages query
 						---
@@ -316,19 +385,29 @@
 								item.add_marker(xfail_marker)
 						```
 						---
+						## Closing the loop (conftest) IV
+						```python
+						# tests/conftest.py
+						def pytest_runtest_makereport(item, call):
+							if call.when != "call" or not call.excinfo:
+								return
+
+							if not (flaky := FLAKY_TESTS.get(item.nodeid)):
+								return
+
+							if str(call.excinfo.value) == flaky["traceback"]:
+								call.wasxfail = "Flaky test matched expected failure"
+								call.outcome = "skipped"  # Treat as xfail
+						```
+						---
+						## Demo
+						---
 						## Next steps
 						- Investigate timing regressions (tests taking longer) using report.duration
 						- Investigate test ordering issues
-						- (Optional) Non-automatic quarantining
-						---
-						## Practical recommendations
-						```bash
-						$ pip install pytest-randomly pytest-socket
-						$ pip install pytest-testmon
-						```
+						- Non-automatic quarantining
 						---
 						## Thanks
-						---
 					</textarea>
 				</section>
 			</div>
