@@ -377,25 +377,3 @@ def send_to_ci_viz(data):
         # Don't fail the test run if CI Viz is unavailable
         pass
 
-
-# def send_to_ci_viz(data):
-#     """Send test session data to CI Viz."""
-#     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
-
-#     try:
-#         # Prepare request
-#         url = f"{ci_viz_url}/api/v1/ingest-test-results/"
-#         json_data = json.dumps(data).encode("utf-8")
-
-#         req = urllib.request.Request(
-#             url,
-#             data=json_data,
-#             headers={"Content-Type": "application/json"},
-#             method="POST",
-#         )
-
-#         urllib.request.urlopen(req, timeout=30).close()
-
-#     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError):
-#         # Don't fail the test run if CI Viz is unavailable
-#         pass

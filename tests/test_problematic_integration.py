@@ -24,11 +24,3 @@ def test_stable_example():
     """A stable test that should always pass."""
     assert True
 
-
-def test_another_flaky_example():
-    """Another flaky test for demonstration."""
-    # This test will fail ~40% of the time
-    if random.random() < 0.4:
-        msg = "Another simulated flaky test failure"
-        raise AssertionError(msg)
-    assert True
