@@ -9,31 +9,32 @@ import urllib.parse
 import urllib.request
 import uuid
 from datetime import UTC, datetime
-import pprint
+
+# import pprint
 
 import pytest
 
 TEST_DATA = {}
-PROBLEMATIC_TESTS = {}  # Cache for problematic tests: {test_fqn: [exception_messages]}
+FLAKY_TESTS = {}  # Cache for flaky tests: {test_fqn: [exception_messages]}
 
 
-def fetch_problematic_tests():
-    """Fetch list of problematic tests with their expected exceptions from CI Viz service."""
-    global PROBLEMATIC_TESTS  # noqa: PLW0602
+def fetch_flaky_tests():
+    """Fetch list of flaky tests with their expected exceptions from CI Viz service."""
+    global FLAKY_TESTS  # noqa: PLW0602
 
     ci_viz_url = os.environ.get("CI_VIZ_URL", "http://localhost:8000")
 
-    # Get git info to filter problematic tests by repo and branch
+    # Get git info to filter flaky tests by repo and branch
     git_info = get_git_info()
     git_repository_url = git_info.get("git_repository_url")
     git_branch = git_info.get("git_branch")
 
     # Skip if we don't have git info or if it's unknown
     if not git_repository_url or git_repository_url == "unknown":
-        return  # No repository info available, can't filter problematic tests
+        return  # No repository info available, can't filter flaky tests
 
     if not git_branch or git_branch == "unknown":
-        return  # No branch info available, can't filter problematic tests
+        return  # No branch info available, can't filter flaky tests
 
     try:
         # Build URL with query parameters
@@ -41,12 +42,12 @@ def fetch_problematic_tests():
             "git_repository_url": git_repository_url,
             "git_branch": git_branch,
             "detailed": "false",  # We need test FQNs with expected exceptions
-            "days": os.environ.get("CI_VIZ_PROBLEMATIC_DAYS", "7"),
+            "days": os.environ.get("CI_VIZ_FLAKY_DAYS", "7"),
             "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3"),
         }
 
         query_string = urllib.parse.urlencode(params)
-        url = f"{ci_viz_url}/api/v1/problematic-tests?{query_string}"
+        url = f"{ci_viz_url}/api/v1/flaky-tests?{query_string}"
 
         req = urllib.request.Request(url, method="GET")
 
@@ -54,8 +55,8 @@ def fetch_problematic_tests():
             if response.status == 200:
                 data = json.loads(response.read().decode("utf-8"))
                 # Now we get a dict mapping test_fqn to list of expected exceptions
-                problematic_tests_dict = data.get("problematic_tests", {})
-                PROBLEMATIC_TESTS.update(problematic_tests_dict)
+                flaky_tests_dict = data.get("flaky_tests", {})
+                FLAKY_TESTS.update(flaky_tests_dict)
             # Non-200 responses are silently ignored
 
     except urllib.error.URLError:
@@ -67,11 +68,11 @@ def fetch_problematic_tests():
 
 
 def pytest_sessionstart(session):  # noqa: ARG001
-    """Capture session start info and fetch problematic tests."""
+    """Capture session start info and fetch flaky tests."""
     global TEST_DATA  # noqa: PLW0603
 
-    # Fetch problematic tests first
-    fetch_problematic_tests()
+    # Fetch flaky tests first
+    fetch_flaky_tests()
 
     TEST_DATA = {
         "session_id": str(uuid.uuid4()),
@@ -87,40 +88,43 @@ def pytest_sessionstart(session):  # noqa: ARG001
 def pytest_runtest_makereport(item, call):
     """
     Mark test as xfail if it fails with an expected exception.
-    
+
     This hook is called after the test runs, so we can inspect the actual exception.
     Only mark as xfail if the exception matches one of the expected exceptions for this test.
     """
     # Let pytest generate the report first
     outcome = yield
     report = outcome.get_result()
-    
+
     # Only process test call phase (not setup or teardown)
     if report.when != "call":
         return
-    
+
     # Only process if test failed
     if not report.failed:
         return
-    
+
     test_fqn = item.nodeid
-    
-    # Check if this test is in our problematic tests list
-    expected_exceptions = PROBLEMATIC_TESTS.get(test_fqn, [])
+
+    # Check if this test is in our flaky tests list
+    expected_exceptions = FLAKY_TESTS.get(test_fqn, [])
     if not expected_exceptions:
-        return  # Not a problematic test, let it fail normally
-    
+        return  # Not a flaky test, let it fail normally
+
     # Get the actual exception traceback as a string
     actual_exception = str(report.longrepr) if report.longrepr else ""
-    
+
     # Check if the actual exception matches any of the expected exceptions
     for expected_exception in expected_exceptions:
-        if expected_exception in actual_exception or actual_exception in expected_exception:
+        if (
+            expected_exception in actual_exception
+            or actual_exception in expected_exception
+        ):
             # This is an expected failure! Mark it as xfail
             report.outcome = "skipped"
-            report.wasxfail = f"Test failed with expected exception (known flaky/problematic test tracked by CI Viz)"
+            report.wasxfail = f"Test failed with expected exception (known flaky test tracked by CI Viz)"
             return
-    
+
     # If we get here, the test failed with a DIFFERENT exception than expected
     # This is a REAL failure that should fail the build!
     # Do nothing and let pytest report it as a normal failure
@@ -129,8 +133,8 @@ def pytest_runtest_makereport(item, call):
 def pytest_runtest_logreport(report):
     """Capture individual test results."""
     if report.when == "call":  # Only capture the main test execution
-        # Check if this test was marked as problematic by CI Viz
-        was_marked_problematic = report.nodeid in PROBLEMATIC_TESTS
+        # Check if this test was marked as flaky by CI Viz
+        was_marked_flaky = report.nodeid in FLAKY_TESTS
 
         # Determine the actual test status
         # pytest reports xfailed tests as "skipped" with wasxfail attribute
@@ -163,7 +167,7 @@ def pytest_runtest_logreport(report):
             "test_start_time": datetime.now(UTC).isoformat(),
             "test_file_path": str(report.fspath) if hasattr(report, "fspath") else None,
             "test_line_number": report.location[1] if report.location else None,
-            "was_marked_problematic": was_marked_problematic,  # Track if CI Viz marked this as problematic
+            "was_marked_flaky": was_marked_flaky,  # Track if CI Viz marked this as flaky
         }
         TEST_DATA["test_results"].append(test_result)
 
@@ -288,7 +292,7 @@ def map_pytest_outcome(outcome):
         "failed": "failed",
         "skipped": "skipped",
         "error": "error",
-        "xfailed": "xfailed",  # Expected failure that failed (marked as problematic)
+        "xfailed": "xfailed",  # Expected failure that failed (marked as flaky)
         "xpassed": "xpassed",  # Expected failure that passed (test improved!)
     }
     return mapping.get(outcome, "error")
@@ -317,9 +321,7 @@ def send_to_ci_viz(data):
                 "test_total_duration": test_result["test_total_duration"],
                 "test_call_duration": test_result["test_call_duration"],
                 "test_start_time": test_result["test_start_time"],
-                "was_marked_problematic": test_result.get(
-                    "was_marked_problematic", False
-                ),
+                "was_marked_flaky": test_result.get("was_marked_flaky", False),
                 # Session information
                 "session_id": data["session_id"],
                 "session_start_time": data["session_start_time"],
@@ -376,4 +378,3 @@ def send_to_ci_viz(data):
     ):
         # Don't fail the test run if CI Viz is unavailable
         pass
-

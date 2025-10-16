@@ -54,9 +54,7 @@ class TestResult(BaseModel):
     test_total_duration: float
     test_call_duration: float
     test_start_time: str
-    was_marked_problematic: bool = (
-        False  # Whether CI Viz marked this test as problematic
-    )
+    was_marked_flaky: bool = False  # Whether CI Viz marked this test as flaky
 
     # Session information
     session_id: str
@@ -117,7 +115,7 @@ def init_database():
             test_total_duration REAL NOT NULL,
             test_call_duration REAL NOT NULL,
             test_start_time TEXT NOT NULL,
-            was_marked_problematic INTEGER DEFAULT 0,  -- Whether CI Viz marked this test as problematic (boolean as INTEGER)
+            was_marked_flaky INTEGER DEFAULT 0,  -- Whether CI Viz marked this test as flaky (boolean as INTEGER)
 
             -- Session information
             session_id TEXT NOT NULL,
@@ -176,7 +174,7 @@ def init_database():
         "CREATE INDEX IF NOT EXISTS idx_test_traceback ON test_results(test_traceback)"
     )
     cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_was_marked_problematic ON test_results(was_marked_problematic)"
+        "CREATE INDEX IF NOT EXISTS idx_was_marked_flaky ON test_results(was_marked_flaky)"
     )
 
     conn.commit()
@@ -209,7 +207,7 @@ async def ingest_test_results(test_results: list[TestResult]):
                 INSERT INTO test_results (
                     test_id, test_name, test_fqn, test_module, test_suite, test_file_path, test_line_number,
                     test_status, test_message, test_traceback, test_total_duration, test_call_duration, test_start_time,
-                    was_marked_problematic,
+                    was_marked_flaky,
                     session_id, session_start_time, session_end_time, session_total_duration,
                     git_repository_url, git_branch, git_commit_hash, git_commit_message,
                     git_commit_author, git_commit_author_email, git_commit_timestamp,
@@ -233,7 +231,7 @@ async def ingest_test_results(test_results: list[TestResult]):
                     test_result.test_call_duration,
                     test_result.test_start_time,
                     (
-                        1 if test_result.was_marked_problematic else 0
+                        1 if test_result.was_marked_flaky else 0
                     ),  # Convert bool to int for SQLite
                     test_result.session_id,
                     test_result.session_start_time,
@@ -406,8 +404,8 @@ async def analyze_all(days: int = 7):
         ) from e
 
 
-@app.get("/api/v1/problematic-tests")
-async def get_problematic_tests_endpoint(
+@app.get("/api/v1/flaky-tests")
+async def get_flaky_tests_endpoint(
     git_repository_url: str | None = Query(
         None, description="Filter by repository URL"
     ),
@@ -417,15 +415,16 @@ async def get_problematic_tests_endpoint(
         3, description="Minimum number of runs required to analyze a test"
     ),
     detailed: bool = Query(
-        True, description="Return detailed information (True) or just test FQNs with expected exceptions (False)"
+        True,
+        description="Return detailed information (True) or just test FQNs with expected exceptions (False)",
     ),
 ):
     """
     Get tests that are currently having issues and should be marked as expected failures.
 
     This endpoint combines results from existing analysis queries (flaky tests, cross-branch
-    failures, and underlying issues) to identify problematic tests. It's designed to be called
-    by pytest plugins at session start to get a dict mapping test FQNs to their expected 
+    failures, and underlying issues) to identify  tests. It's designed to be called
+    by pytest plugins at session start to get a dict mapping test FQNs to their expected
     exception messages.
 
     The pytest plugin should only mark a test as xfail if it fails with one of the expected
@@ -440,7 +439,7 @@ async def get_problematic_tests_endpoint(
 
     Returns:
         If detailed=False: Dict mapping test FQN to list of expected exception messages
-        If detailed=True: List of problematic tests with their full details
+        If detailed=True: List of  tests with their full details
     """
     try:
         results = get_problematic_tests(
@@ -453,12 +452,12 @@ async def get_problematic_tests_endpoint(
         if not detailed:
             # Return dict mapping test_fqn to list of expected exception messages
             # This allows conftest to only mark test as xfail if it fails with expected exception
-            problematic_tests_dict = {
+            flaky_tests_dict = {
                 test["test_fqn"]: test.get("expected_exceptions", [])
                 for test in results
             }
             return {
-                "problematic_tests": problematic_tests_dict,
+                "flaky_tests": flaky_tests_dict,
                 "count": len(results),
                 "filters": {
                     "git_repository_url": git_repository_url,
@@ -481,7 +480,7 @@ async def get_problematic_tests_endpoint(
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Failed to get problematic tests: {e!s}"
+            status_code=500, detail=f"Failed to get flaky tests: {e!s}"
         ) from e
 
 

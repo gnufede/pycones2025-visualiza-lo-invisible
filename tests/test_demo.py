@@ -28,17 +28,6 @@ def test_slow_operation():
     assert hello in "hello world"
 
 
-#def test_with_traceback():
-#    """A test that fails with a specific traceback."""
-#    try:
-#        result = 10 / 0
-#        assert result > 0
-#    except ZeroDivisionError as e:
-#        # Re-raise to create a consistent traceback pattern
-#        msg = "Division by zero error in calculation"
-#        raise AssertionError(msg) from e
-
-
 class TestSuite:
     """A test suite to demonstrate test organization."""
 

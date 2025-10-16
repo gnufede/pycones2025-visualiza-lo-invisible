@@ -64,7 +64,7 @@ def test_exception_matching_empty_expected_list():
 
 
 def test_problematic_tests_dict_structure():
-    """Test that PROBLEMATIC_TESTS dict has the expected structure."""
+    """Test that FLAKY_TESTS dict has the expected structure."""
     # Example structure
     problematic_tests = {
         "tests/test_file.py::test_flaky": [
