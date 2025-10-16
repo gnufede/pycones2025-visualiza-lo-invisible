@@ -32,6 +32,7 @@
 						PyConES 2025 (Sevilla)
 						---
 						## I'm Federico Mon
+						![myself](img/myself.png)
 						---
 						## What are we talking about today?
 						- Flaky tests and blocked engineers  <!-- .element: class="fragment" data-fragment-index="1" -->
@@ -151,6 +152,17 @@
 							asyncio.create_task(prepare())
 							await asyncio.sleep(0.0500242)
 							assert ready  # Flaky: might fail
+						```
+						---
+						## Unpinned dependencies
+						```python
+						from flask import Flask
+
+						def test_env_config():
+							app = Flask(__name__)
+							assert app.env == "production"
+
+						# AttributeError with flask>=2.3.0
 						```
 						---
 						## How can we stop this madness?
@@ -341,9 +353,9 @@
 						![drake stare at dashboards or automate solutions](img/choose-your-path.jpg)
 						---
 						## New plan
-						1. Expose API for known flaky tests
-						2. Query backend from CI for known flaky tests
-						3. Don't fail CI job if they fail
+						1. Expose API endpoint for known flaky tests  <!-- .element: class="fragment" data-fragment-index="1" -->
+						2. Query backend from CI for known flaky tests  <!-- .element: class="fragment" data-fragment-index="2" -->
+						3. Don't fail CI job if they fail  <!-- .element: class="fragment" data-fragment-index="3" -->
 						---
 						## Don't fail CI job if they fail
 						![wait what](img/wait-wait-what.gif)
@@ -452,13 +464,13 @@ def test_function():
 						## Demo
 						---
 						## Limitations
-					    - Traceback changes
-					    - Test name/file changes
+						- Traceback changes
+						- Test name/file changes
 						---
 						## Thanks
 						---
 						## Next steps
-						- Investigate timing regressions (tests taking longer) using report.duration
+						- Investigate tests taking longer using report.duration
 						- Investigate test ordering issues
 						- Non-automatic quarantining
 					</textarea>
