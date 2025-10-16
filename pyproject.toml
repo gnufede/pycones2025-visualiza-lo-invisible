@@ -43,5 +43,6 @@ dependencies = [
 ]
 
 [project.scripts]
+rm-db = "ci_viz_simple.main:rm_db"
 ci-viz = "ci_viz_simple.main:main"
 ci-viz-load-fixtures = "ci_viz_simple.fixtures:load_fixtures_cli"

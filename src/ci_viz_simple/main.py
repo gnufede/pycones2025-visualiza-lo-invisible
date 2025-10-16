@@ -820,6 +820,12 @@ async def serve_interface():
     return HTMLResponse(content=html_content)
 
 
+def rm_db():
+    import os
+
+    os.remove(DB_PATH)
+
+
 def main():
     """Main entry point for running the service."""
     uvicorn.run("ci_viz_simple.main:app", host="127.0.0.1", port=8000, reload=True)

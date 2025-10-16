@@ -14,7 +14,7 @@ def test_always_pass():
 def test_sometimes_flaky():
     """A test that sometimes fails to demonstrate flaky test detection."""
     # Simulate flakiness - fails ~30% of the time
-    if random.random() < 0.3:
+    if random.random() < 0.5:
         msg = "Simulated flaky failure"
         raise AssertionError(msg)
     assert True
