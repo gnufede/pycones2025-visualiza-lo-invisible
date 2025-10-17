@@ -394,7 +394,7 @@ def test_function():
 							WHERE git_repository_url = ? AND git_branch = ?
 							GROUP BY test_fqn, git_commit_hash
 							HAVING SUM(test_status = 'passed') > 0
-							AND SUM(test_status = 'failed') > 0
+							AND (SUM(test_status = 'failed') > 0 OR SUM(test_status = 'xfailed') > 0)
 						"""
 						cursor.execute(query, (repo, 'main'))
 						flaky_tests = cursor.fetchall()
@@ -427,12 +427,12 @@ def test_function():
 							) as r:
 								data = json.load(r)
 								FLAKY_TESTS.update(
-									data.get("problematic_tests", {})
+									data.get("flaky_tests", {})
 								)
 						```
 						---
-						## Xfail approach (plugin)
-						- Problem: Hides NEW bugs with different exceptions!  <!-- .element: class="fragment" data-fragment-index="1" -->
+						## Xfail marker (plugin)
+						- Problem: Just compares exception type  <!-- .element: class="fragment" data-fragment-index="1" -->
 						```python
 						def pytest_runtest_setup(item):
 							"""Mark flaky tests as expected failures before they run."""
@@ -440,7 +440,7 @@ def test_function():
 								xfail_marker = pytest.mark.xfail(
 									reason="Test detected as flaky",
 									strict=False,  # Allows the test to pass
-							        # raises=RuntimeError,  # FIXME
+							        raises=RuntimeError,  # FIXME
 								)
 								item.add_marker(xfail_marker)
 						```
@@ -462,7 +462,7 @@ def test_function():
 						```
 						---
 						## Demo
-					    - `hatch run rm-db` (deletes database)
+						- `hatch run rm-db` (deletes database)
 						- `hatch run ci-viz` (starts http server)
 						- `hatch test -vv` (runs pytest)
 						---
