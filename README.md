@@ -146,7 +146,3 @@ The integration is controlled by environment variables:
 export CI_VIZ_URL="http://localhost:8000"
 export CI_VIZ_DEBUG="true"
 
-# Problematic test detection tuning
-export CI_VIZ_PROBLEMATIC_DAYS="7"        # Days of history to analyze
-export CI_VIZ_MIN_RUNS="3"                # Minimum runs to consider a test
-```
