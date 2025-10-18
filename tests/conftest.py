@@ -42,8 +42,6 @@ def fetch_flaky_tests():
             "git_repository_url": git_repository_url,
             "git_branch": git_branch,
             "detailed": "false",  # We need test FQNs with expected exceptions
-            "days": os.environ.get("CI_VIZ_FLAKY_DAYS", "7"),
-            "min_runs": os.environ.get("CI_VIZ_MIN_RUNS", "3"),
         }
 
         query_string = urllib.parse.urlencode(params)

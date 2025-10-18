@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from ci_viz_simple.queries import (
     get_failing_tests_across_branches,
     get_flaky_tests,
-    get_problematic_tests,
     get_test_order_correlations,
     get_test_time_regressions,
     get_underlying_issues,
@@ -405,83 +404,15 @@ async def analyze_all(days: int = 7):
 
 
 @app.get("/api/v1/flaky-tests")
-async def get_flaky_tests_endpoint(
-    git_repository_url: str | None = Query(
-        None, description="Filter by repository URL"
-    ),
-    git_branch: str | None = Query(None, description="Filter by git branch"),
-    days: int = Query(7, description="Number of days to look back for analysis"),
-    min_runs: int = Query(
-        3, description="Minimum number of runs required to analyze a test"
-    ),
-    detailed: bool = Query(
-        True,
-        description="Return detailed information (True) or just test FQNs with expected exceptions (False)",
-    ),
-):
-    """
-    Get tests that are currently having issues and should be marked as expected failures.
+def flaky_tests(git_repository_url: str, git_branch: str):
+    tests = get_flaky_tests(
+        git_repository_url=git_repository_url, git_branch=git_branch
+    )
 
-    This endpoint combines results from existing analysis queries (flaky tests, cross-branch
-    failures, and underlying issues) to identify  tests. It's designed to be called
-    by pytest plugins at session start to get a dict mapping test FQNs to their expected
-    exception messages.
-
-    The pytest plugin should only mark a test as xfail if it fails with one of the expected
-    exceptions. This prevents hiding new bugs that manifest as different exceptions.
-
-    Args:
-        git_repository_url: Filter by specific repository (optional)
-        git_branch: Filter by specific branch (optional)
-        days: Number of days to look back for analysis
-        min_runs: Minimum number of runs required to analyze a test
-        detailed: Return detailed information (True) or dict mapping test_fqn to expected exceptions (False)
-
-    Returns:
-        If detailed=False: Dict mapping test FQN to list of expected exception messages
-        If detailed=True: List of  tests with their full details
-    """
-    try:
-        results = get_problematic_tests(
-            git_repository_url=git_repository_url,
-            git_branch=git_branch,
-            days=days,
-            min_runs=min_runs,
-        )
-
-        if not detailed:
-            # Return dict mapping test_fqn to list of expected exception messages
-            # This allows conftest to only mark test as xfail if it fails with expected exception
-            flaky_tests_dict = {
-                test["test_fqn"]: test.get("expected_exceptions", [])
-                for test in results
-            }
-            return {
-                "flaky_tests": flaky_tests_dict,
-                "count": len(results),
-                "filters": {
-                    "git_repository_url": git_repository_url,
-                    "git_branch": git_branch,
-                    "days": days,
-                    "min_runs": min_runs,
-                },
-            }
-        # Return detailed information
-        return {
-            "results": results,
-            "count": len(results),
-            "filters": {
-                "git_repository_url": git_repository_url,
-                "git_branch": git_branch,
-                "days": days,
-                "min_runs": min_runs,
-            },
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get flaky tests: {e!s}"
-        ) from e
+    # Return dict: test_fqn -> [expected_exception_messages]
+    return {
+        "flaky_tests": {test["test_fqn"]: test["expected_exceptions"] for test in tests}
+    }
 
 
 @app.get("/api/v1/test-results/")

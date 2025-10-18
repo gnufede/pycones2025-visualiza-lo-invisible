@@ -19,7 +19,11 @@ DB_PATH = Path(__file__).parent / "ci_viz.db"
 
 # Valid test statuses for filtering
 VALID_STATUSES = ("passed", "failed", "error", "skipped", "xfailed", "xpassed")
-FAILURE_STATUSES = ("failed", "error", "xfailed")  # xfailed is also a failure (expected)
+FAILURE_STATUSES = (
+    "failed",
+    "error",
+    "xfailed",
+)  # xfailed is also a failure (expected)
 
 # Default thresholds for analysis queries
 DEFAULT_DAYS_LOOKBACK = 7
@@ -56,124 +60,29 @@ def _execute_query(query: str, params: tuple) -> list[tuple]:
 
 
 def get_flaky_tests(
-    days: int = DEFAULT_DAYS_LOOKBACK,
-    min_runs: int = DEFAULT_MIN_RUNS,
     git_repository_url: str | None = None,
     git_branch: str | None = None,
 ) -> list[dict[str, t.Any]]:
-    """
-    Query 1: Flaky tests - Tests that have both passing and failing runs for the same commit.
 
-    A test is considered flaky if:
-    - It has been run multiple times for the same git commit
-    - It has both successful runs (passed) and failed runs (failed/error)
-    - It meets the minimum run count threshold
-
-    Args:
-        days: Number of days to look back for test runs
-        min_runs: Minimum number of runs required to consider a test for flakiness analysis
-        git_repository_url: Filter by specific repository (optional)
-        git_branch: Filter by specific branch (optional)
-
-    Returns:
-        List of dictionaries containing flaky test information
-    """
-    # Calculate date threshold
-    date_threshold = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-
-    # Build WHERE clause dynamically based on provided filters
-    where_conditions = [
-        "test_start_time >= ?",
-        "git_commit_hash IS NOT NULL",
-        "git_commit_hash != 'unknown'",
-        "test_status IN ('passed', 'failed', 'error', 'skipped', 'xfailed', 'xpassed')",
-    ]
-    params = [date_threshold]
-
+    params = list()
     if git_repository_url:
-        where_conditions.append("git_repository_url = ?")
         params.append(git_repository_url)
 
     if git_branch:
-        where_conditions.append("git_branch = ?")
         params.append(git_branch)
 
-    where_clause = " AND ".join(where_conditions)
-
-    query = f"""
-        -- CTE (Common Table Expression) to group test runs by test and commit
-        WITH test_runs_by_commit AS (
-            SELECT
-                test_fqn,                    -- The full test name (e.g., "tests/test_flaky.py::test_flaky")
-                git_commit_hash,             -- The git commit where this test was run
-
-                -- Count total runs for this test on this commit
-                COUNT(*) as total_runs,
-
-                -- Count how many times each status occurred using conditional aggregation
-                -- CASE WHEN creates a boolean (0 or 1), SUM adds them up
-                SUM(CASE WHEN test_status IN ('passed', 'xpassed') THEN 1 ELSE 0 END) as passed_count,
-                SUM(CASE WHEN test_status IN ('failed', 'error', 'xfailed') THEN 1 ELSE 0 END) as failed_count,
-                SUM(CASE WHEN test_status = 'skipped' THEN 1 ELSE 0 END) as skipped_count,
-
-                -- Find the time range when this test was run
-                MIN(test_start_time) as first_run,    -- Earliest run
-                MAX(test_start_time) as last_run,     -- Latest run
-
-                -- Count how many different test sessions this test ran in
-                COUNT(DISTINCT session_id) as session_count
-
-            FROM test_results
-            WHERE {where_clause}
-
-            -- GROUP BY groups rows with the same test_fqn AND git_commit_hash together
-            -- This means we're looking at all runs of the same test on the same commit
-            GROUP BY test_fqn, git_commit_hash
-
-            -- HAVING filters the grouped results (like WHERE but for groups)
-            HAVING total_runs >= ?           -- Must have at least min_runs to be considered
-                AND passed_count > 0         -- Must have at least one passing run
-                AND failed_count > 0         -- Must have at least one failing run
-                -- This combination (passed > 0 AND failed > 0) defines flakiness!
-        )
-        -- Main SELECT: return the flaky test information
-        SELECT
-            test_fqn,
-            git_commit_hash,
-            total_runs,
-            passed_count,
-            failed_count,
-            skipped_count,
-            first_run,
-            last_run,
-            session_count,
-            -- Calculate pass rate as percentage: (passed / total) * 100
-            ROUND((passed_count * 100.0 / total_runs), 1) as pass_rate
-        FROM test_runs_by_commit
-        -- Order by most runs first (most frequently flaky), then by most failures
-        ORDER BY total_runs DESC, failed_count DESC
+    query = """
+        SELECT test_fqn,
+            GROUP_CONCAT(DISTINCT test_traceback) as expected_exceptions
+        FROM test_results
+        WHERE git_repository_url = ? AND git_branch = ?
+        GROUP BY test_fqn, git_commit_hash
+        HAVING SUM(test_status = 'passed') > 0
+        AND SUM(test_status = 'failed') > 0
     """
-
-    # Add min_runs to params
-    params.append(min_runs)
-
     results = _execute_query(query, tuple(params))
 
-    return [
-        {
-            "test_fqn": row[0],
-            "git_commit_hash": row[1],
-            "total_runs": row[2],
-            "passed_count": row[3],
-            "failed_count": row[4],
-            "skipped_count": row[5],
-            "first_run": row[6],
-            "last_run": row[7],
-            "session_count": row[8],
-            "pass_rate": row[9],
-        }
-        for row in results
-    ]
+    return [{"test_fqn": row[0], "expected_exceptions": row[1]} for row in results]
 
 
 def get_failing_tests_across_branches(
@@ -688,7 +597,7 @@ def get_problematic_tests(
     def get_exception_messages_for_test(test_fqn: str) -> list[str]:
         """Fetch unique exception messages for a specific test."""
         date_threshold = (datetime.now(UTC) - timedelta(days=days)).isoformat()
-        
+
         where_conditions = [
             "test_fqn = ?",
             "test_start_time >= ?",
@@ -697,24 +606,24 @@ def get_problematic_tests(
             "test_traceback != ''",
         ]
         params = [test_fqn, date_threshold]
-        
+
         if git_repository_url:
             where_conditions.append("git_repository_url = ?")
             params.append(git_repository_url)
-        
+
         if git_branch:
             where_conditions.append("git_branch = ?")
             params.append(git_branch)
-        
+
         where_clause = " AND ".join(where_conditions)
-        
+
         query = f"""
             SELECT DISTINCT test_traceback
             FROM test_results
             WHERE {where_clause}
             LIMIT 10
         """
-        
+
         results = _execute_query(query, tuple(params))
         return [row[0] for row in results if row[0]]
 
@@ -760,9 +669,13 @@ def get_problematic_tests(
             problematic_tests[test_fqn]["problem_type"] = "flaky_and_failing"
             problematic_tests[test_fqn]["source_analysis"] += ", cross_branch_failures"
             # Merge exception messages
-            existing_exceptions = set(problematic_tests[test_fqn].get("expected_exceptions", []))
+            existing_exceptions = set(
+                problematic_tests[test_fqn].get("expected_exceptions", [])
+            )
             new_exceptions = get_exception_messages_for_test(test_fqn)
-            problematic_tests[test_fqn]["expected_exceptions"] = list(existing_exceptions | set(new_exceptions))
+            problematic_tests[test_fqn]["expected_exceptions"] = list(
+                existing_exceptions | set(new_exceptions)
+            )
         else:
             problematic_tests[test_fqn] = {
                 "test_fqn": test_fqn,
@@ -808,9 +721,13 @@ def get_problematic_tests(
                 if problematic_tests[test_fqn]["confidence"] != "high":
                     problematic_tests[test_fqn]["confidence"] = "high"
                 # Merge exception messages
-                existing_exceptions = set(problematic_tests[test_fqn].get("expected_exceptions", []))
+                existing_exceptions = set(
+                    problematic_tests[test_fqn].get("expected_exceptions", [])
+                )
                 new_exceptions = get_exception_messages_for_test(test_fqn)
-                problematic_tests[test_fqn]["expected_exceptions"] = list(existing_exceptions | set(new_exceptions))
+                problematic_tests[test_fqn]["expected_exceptions"] = list(
+                    existing_exceptions | set(new_exceptions)
+                )
             else:
                 problematic_tests[test_fqn] = {
                     "test_fqn": test_fqn,
