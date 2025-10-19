@@ -226,7 +226,7 @@
 									"test_fqn": report.nodeid,
 									"test_name": report.nodeid.split("::")[-1],
 									"test_status": report.outcome,
-									"test_traceback": str(report.longrepr) if report.failed else None,
+									"test_traceback": str(report.longrepr).replace(",", "?") if report.failed else None,
 									"test_duration": report.duration,
 									"test_file_path": str(getattr(report, "fspath", "None")),
 									"test_line_number": report.location[1] if report.location else None,
@@ -400,7 +400,24 @@ def test_function():
 							AND (SUM(test_status = 'failed') > 0 OR SUM(test_status = 'xfailed') > 0)
 						"""
 						cursor.execute(query, (repo, 'main'))
-						flaky_tests = cursor.fetchall()
+						results = cursor.fetchall()
+						```
+						---
+						## Flaky tests query (backend)
+						```python
+						parsed = []
+						for test_fqn, concat in results:
+							if not concat:
+								exceptions = []
+							else:
+								exceptions = [t.replace("?", ",") for t in concat.split(",")]
+							parsed.append(
+								{
+									"test_fqn": test_fqn,
+									"expected_exceptions": exceptions,
+								}
+							)
+						return parsed
 						```
 						---
 						## Flaky tests endpoint (backend)
