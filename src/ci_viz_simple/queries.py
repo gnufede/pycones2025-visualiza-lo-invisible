@@ -82,7 +82,23 @@ def get_flaky_tests(
     """
     results = _execute_query(query, tuple(params))
 
-    return [{"test_fqn": row[0], "expected_exceptions": row[1]} for row in results]
+    parsed = []
+    for test_fqn, concat in results:
+        if not concat:
+            exceptions = []
+        else:
+            # Split on commas (added by GROUP_CONCAT)
+            # and restore any commas that were replaced before insert
+            exceptions = [t.replace("⸴", ",") for t in concat.split(",")]
+
+        parsed.append(
+            {
+                "test_fqn": test_fqn,
+                "expected_exceptions": exceptions,
+            }
+        )
+
+    return parsed
 
 
 def get_failing_tests_across_branches(

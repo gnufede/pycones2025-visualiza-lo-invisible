@@ -159,7 +159,9 @@ def pytest_runtest_logreport(report):
             ),
             "test_status": test_status,
             "test_message": str(report.longrepr) if report.failed else None,
-            "test_traceback": str(report.longrepr) if report.failed else None,
+            "test_traceback": (
+                str(report.longrepr).replace(",", "⸴") if report.failed else None
+            ),
             "test_total_duration": report.duration,
             "test_call_duration": report.duration,
             "test_start_time": datetime.now(UTC).isoformat(),
