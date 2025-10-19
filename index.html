@@ -226,7 +226,9 @@
 									"test_fqn": report.nodeid,
 									"test_name": report.nodeid.split("::")[-1],
 									"test_status": report.outcome,
-									"test_traceback": str(report.longrepr).replace(",", "?") if report.failed else None,
+									"test_traceback": (
+										str(report.longrepr).replace(",", "?") if report.failed else None
+									),
 									"test_duration": report.duration,
 									"test_file_path": str(getattr(report, "fspath", "None")),
 									"test_line_number": report.location[1] if report.location else None,
